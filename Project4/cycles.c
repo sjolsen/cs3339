@@ -10,7 +10,8 @@
 #include <stdbool.h>
 #include <inttypes.h>
 #include <limits.h>
-#include <string.h>
+
+#include "debug.h"
 
 typedef intmax_t integer;
 #define PR_INTEGER PRIiMAX
@@ -187,6 +188,7 @@ static void Interpret (uint32_t start)
 
   /// Control data
   uint32_t pipeline [STAGES] = {};
+  uint32_t pipeline_pc [STAGES] = {};
   enum regid dest_reg [STAGES] = {};
   enum pipestage result_stage [STAGES] = {};
 
@@ -197,18 +199,40 @@ static void Interpret (uint32_t start)
   integer flushes = 0;
 
   /// Control functions
+  void DEBUG_STAGE (enum pipestage STAGE)
+  {
+    static const char* stagename [] = {
+        [IF1]  = "IF1",
+        [IF2]  = "IF2",
+        [ID]   = "ID",
+        [EXE1] = "EXE1",
+        [EXE2] = "EXE2",
+        [MEM1] = "MEM1",
+        [MEM2] = "MEM2",
+        [MEM3] = "MEM3",
+        [WB]   = "WB",
+    };
+
+    fprintf (stderr, "%4s: ", stagename [STAGE]);
+    Decode (pipeline_pc [STAGE], pipeline [STAGE]);
+  }
+
   void INSERT_NOP (enum pipestage STAGE)
   {
-    pipeline [STAGE] = 0;
-    dest_reg [STAGE] = ZERO;
+    pipeline [STAGE]     = 0;
+    pipeline_pc [STAGE]  = 0;
+    dest_reg [STAGE]     = ZERO;
     result_stage [STAGE] = IF1;
   }
 
   void ADVANCE_PIPELINE (enum pipestage FROM_STAGE)
   {
-    memmove (pipeline     + FROM_STAGE + 1, pipeline     + FROM_STAGE, (STAGES - (FROM_STAGE + 1)) * sizeof (pipeline [0]));
-    memmove (dest_reg     + FROM_STAGE + 1, dest_reg     + FROM_STAGE, (STAGES - (FROM_STAGE + 1)) * sizeof (dest_reg [0]));
-    memmove (result_stage + FROM_STAGE + 1, result_stage + FROM_STAGE, (STAGES - (FROM_STAGE + 1)) * sizeof (result_stage [0]));
+    for (enum pipestage to_stage = WB; to_stage > FROM_STAGE; --to_stage) {
+      pipeline [to_stage]     = pipeline [to_stage - 1];
+      pipeline_pc [to_stage]  = pipeline_pc [to_stage - 1];
+      dest_reg [to_stage]     = dest_reg [to_stage - 1];
+      result_stage [to_stage] = result_stage [to_stage - 1];
+    }
     INSERT_NOP (FROM_STAGE);
     ++cycles;
   }
@@ -257,7 +281,13 @@ static void Interpret (uint32_t start)
       pipeline [IF1] = Fetch (pc);
       reg [ZERO] = 0;
       pc += 4;
+      pipeline_pc [IF1] = pc;
       ++count;
+
+      // Special-case the STOP trap to avoid fetching inaccessible memory
+      if (bitrange (pipeline [IF1], 26, 32) == TRAP &&
+          (bitrange (pipeline [IF1], 0, 26) & 0xf) == STOP)
+        cont = false;
     }
     else {
       for (enum pipestage stage = IF1; stage < STAGES; ++stage)
@@ -269,6 +299,7 @@ static void Interpret (uint32_t start)
 
     // ID operations
     uint32_t ID_instr = pipeline [ID];
+    uint32_t ID_pc    = pipeline_pc [ID];
     uint8_t  opcode   = bitrange (ID_instr, 26, 32);
     uint8_t  rs       = bitrange (ID_instr, 21, 26);
     uint8_t  rt       = bitrange (ID_instr, 16, 21);
@@ -278,8 +309,8 @@ static void Interpret (uint32_t start)
     uint16_t uimm     = bitrange (ID_instr, 0, 16);
     int16_t  simm     = sign_extend (uimm, 16);
     uint32_t addr     = bitrange (ID_instr, 0, 26);
-    uint32_t jaddr    = (pc & 0xf0000000) + addr * 4;
-    uint32_t baddr    = pc + simm * 4;
+    uint32_t jaddr    = (ID_pc & 0xf0000000) + addr * 4;
+    uint32_t baddr    = ID_pc + simm * 4;
 
     // ID (via RREAD) through WB operations
     switch (opcode)
@@ -442,6 +473,7 @@ static void Interpret (uint32_t start)
 
           case STOP:
             cont = false;
+            break;
 
           default:
             fprintf (stderr, "unimplemented trap: pc = 0x%"PRIx32"\n", pc - 4);
@@ -466,6 +498,10 @@ static void Interpret (uint32_t start)
         cont = false;
     }
 
+    if (!cont) {
+      FLUSH (IF2);
+      FLUSH (IF1);
+    }
     ADVANCE_PIPELINE (IF1);
   }
 
