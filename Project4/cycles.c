@@ -11,6 +11,8 @@
 #include <limits.h>
 #include <string.h>
 
+#define ARRAYLEN(NAME) (sizeof(NAME)/sizeof(*(NAME)))
+
 typedef intmax_t integer;
 #define PR_INTEGER PRIiMAX
 
@@ -104,6 +106,21 @@ enum opcode {
   SW       = 0x2B
 };
 
+static
+integer opstats [] = {
+  [FUNCTION] = 0,
+  [J]        = 0,
+  [JAL]      = 0,
+  [BEQ]      = 0,
+  [BNE]      = 0,
+  [ADDIU]    = 0,
+  [ANDI]     = 0,
+  [LUI]      = 0,
+  [TRAP]     = 0,
+  [LW]       = 0,
+  [SW]       = 0
+};
+
 enum funcode {
   SLL  = 0x00,
   SRA  = 0x03,
@@ -115,6 +132,53 @@ enum funcode {
   ADDU = 0x21,
   SUBU = 0x23,
   SLT  = 0x2a
+};
+
+static
+integer funstats [] = {
+  [SLL]  = 0,
+  [SRA]  = 0,
+  [JR]   = 0,
+  [MFHI] = 0,
+  [MFLO] = 0,
+  [MULT] = 0,
+  [DIV]  = 0,
+  [ADDU] = 0,
+  [SUBU] = 0,
+  [SLT]  = 0
+};
+
+struct enummap {
+  const char* desc;
+  int value;
+};
+
+static
+const struct enummap opnames [] = {
+  {"J",    0x02},
+  {"JAL",  0x03},
+  {"BEQ",  0x04},
+  {"BNE",  0x05},
+  {"ADDIU",0x09},
+  {"ANDI", 0x0C},
+  {"LUI",  0x0F},
+  {"TRAP", 0x1A},
+  {"LW",   0x23},
+  {"SW",   0x2B}
+};
+
+static
+const struct enummap funnames [] = {
+  {"SLL",  0x00},
+  {"SRA",  0x03},
+  {"JR",   0x08},
+  {"MFHI", 0x10},
+  {"MFLO", 0x12},
+  {"MULT", 0x18},
+  {"DIV",  0x1A},
+  {"ADDU", 0x21},
+  {"SUBU", 0x23},
+  {"SLT",  0x2a}
 };
 
 enum trapcode {
@@ -274,9 +338,11 @@ static void Interpret (uint32_t start)
     uint32_t baddr  = pc + simm * 4;
 
     // ID (via RREAD) through WB operations
+    ++opstats [opcode];
     switch (opcode)
     {
       case FUNCTION:
+        ++funstats [funct];
         switch (funct)
         {
           case SLL:
@@ -467,6 +533,12 @@ halt:
           "instructions = %"PR_INTEGER"\n"
           "cycles - 8 - bubbles - flushes = %"PR_INTEGER"\n",
           cycles, bubbles, flushes, count, cycles - 8 - bubbles - flushes);
+
+  printf ("\n");
+  for (int i = 0; i < ARRAYLEN (opnames); ++i)
+    printf ("%5s : %"PR_INTEGER"\n", opnames [i].desc, opstats [opnames [i].value]);
+  for (int i = 0; i < ARRAYLEN (funnames); ++i)
+    printf ("%5s : %"PR_INTEGER"\n", funnames [i].desc, funstats [funnames [i].value]);
 }
 
 
