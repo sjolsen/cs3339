@@ -185,8 +185,8 @@ static void Interpret (uint32_t start)
   uint32_t lo, hi;
 
   /// Control data
-  enum regid     dest_reg     [STAGES];
-  enum pipestage result_stage [STAGES];
+  enum regid     dest_reg     [STAGES] = {};
+  enum pipestage result_stage [STAGES] = {};
 
   /// Statistical data
   integer count   = 0;
@@ -209,9 +209,10 @@ static void Interpret (uint32_t start)
     ++cycles;
   }
 
-  void FLUSH (enum pipestage STAGE)
+  void FLUSH ()
   {
-    INSERT_NOP (STAGE);
+    INSERT_NOP (IF2);
+    ADVANCE_PIPELINE ();
     ++flushes;
   }
 
@@ -227,30 +228,37 @@ static void Interpret (uint32_t start)
     if (REG == ZERO)
       return;
 
-    for (enum pipestage writer = IF1; writer < STAGE; ++writer) // Find the first writer on whose result we're dependent
+    for (enum pipestage writer = ID + 1; writer < STAGES; ++writer) // Find the latest writer on whose result we're dependent
       if (dest_reg [writer] == REG) {
-        while (++writer < STAGE) // and run him through the stage after which his result is available
+        int cycles_to_available = result_stage [writer] - writer;
+        int cycles_to_needed    = STAGE - ID;
+        while (cycles_to_available > cycles_to_needed) { // and execute until we can forward its result
           BUBBLE ();
+          --cycles_to_available;
+        }
         break;
       }
   }
 
   // STAGE is the first stage in which the value in REG is available
   void RWRITE (enum pipestage STAGE, enum regid REG) {
+    dest_reg [ID] = REG;
+    result_stage [ID] = STAGE;
   }
 
   /// Begin program execution
   // Initialize the pipeline
-  for (enum pipestage stage = IF1; stage < STAGES; ++stage)
-    INSERT_NOP (stage);
+  for (int i = 0; i < STAGES - 1; ++i)
+    ADVANCE_PIPELINE ();
 
   // Main loop
   while (1) {
     // IF1/2 operations
-    uint32_t instr = Fetch(pc);
+    uint32_t instr = Fetch (pc);
     reg [ZERO] = 0;
     pc += 4;
     ++count;
+    ADVANCE_PIPELINE ();
 
     // ID operations
     uint8_t  opcode = bitrange (instr, 26, 32);
@@ -286,6 +294,8 @@ static void Interpret (uint32_t start)
           case JR:
             RREAD (ID, rs);
             pc = reg [rs];
+            FLUSH ();
+            FLUSH ();
             break;
 
           case MFHI:
@@ -352,26 +362,36 @@ static void Interpret (uint32_t start)
 
       case J:
         pc = jaddr;
+        FLUSH ();
+        FLUSH ();
         break;
 
       case JAL:
         reg [31] = pc;
         pc = jaddr;
         RWRITE (EXE1, 31);
+        FLUSH ();
+        FLUSH ();
         break;
 
       case BEQ:
         RREAD (ID, rs);
         RREAD (ID, rt);
-        if (reg [rs] == reg [rt])
+        if (reg [rs] == reg [rt]) {
           pc = baddr;
+          FLUSH ();
+          FLUSH ();
+        }
         break;
 
       case BNE:
         RREAD (ID, rs);
         RREAD (ID, rt);
-        if (reg [rs] != reg [rt])
+        if (reg [rs] != reg [rt]) {
           pc = baddr;
+          FLUSH ();
+          FLUSH ();
+        }
         break;
 
       case ADDIU:
@@ -440,7 +460,12 @@ static void Interpret (uint32_t start)
   }
 
 halt:
-  ;
+  printf ("cycles = %"PR_INTEGER"\n"
+          "bubbles = %"PR_INTEGER"\n"
+          "flushes = %"PR_INTEGER"\n"
+          "instructions = %"PR_INTEGER"\n"
+          "cycles - 8 - bubbles - flushes = %"PR_INTEGER"\n",
+          cycles, bubbles, flushes, count, cycles - 8 - bubbles - flushes);
 }
 
 
