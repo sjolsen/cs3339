@@ -9,13 +9,14 @@
 #include <stdint.h>
 #include <inttypes.h>
 #include <limits.h>
+#include <string.h>
 
 typedef intmax_t integer;
 #define PR_INTEGER PRIiMAX
 
 // Extracts an the unsigned value on [low, high)
 static inline
-uint32_t BITRANGE (uint32_t value,
+uint32_t bitrange (uint32_t value,
                    uint_fast8_t low,
                    uint_fast8_t high)
 {
@@ -24,7 +25,7 @@ uint32_t BITRANGE (uint32_t value,
 
 // Extends the highest bit on [0, bits)
 static inline
-uint32_t SIGN_EXTEND (uint32_t value,
+uint32_t sign_extend (uint32_t value,
                       uint_fast8_t bits)
 {
   if (value & (1 << (bits - 1))) // Highest bit 1
@@ -156,9 +157,8 @@ enum regid {
   SP   = 29,
   FP   = 30,
   RA   = 31,
-  LO   = 32,
-  HI   = 33,
-  REGS = 1 + HI - ZERO
+  REGS = 1 + RA - ZERO,
+  HILO
 };
 
 enum pipestage {
@@ -176,116 +176,172 @@ enum pipestage {
 
 static void Interpret (uint32_t start)
 {
-  // Registers
+  /// Registers
   uint32_t pc = start;
   uint32_t reg [REGS] = {
     [GP] = 0x10008000,
     [SP] = 0x10000000 + MEMSIZE
   };
+  uint32_t lo, hi;
 
-  // Control data
-  integer count = 0;
+  /// Control data
+  enum regid     dest_reg     [STAGES];
+  enum pipestage result_stage [STAGES];
 
-  #define RREAD(REG)
-  #define RWRITE(REG)
+  /// Statistical data
+  integer count   = 0;
+  integer cycles  = 0;
+  integer bubbles = 0;
+  integer flushes = 0;
+
+  /// Control functions
+  void INSERT_NOP (enum pipestage STAGE)
+  {
+    dest_reg [STAGE] = ZERO;
+    result_stage [STAGE] = IF1;
+  }
+
+  void ADVANCE_PIPELINE ()
+  {
+    memmove (dest_reg + 1, dest_reg, (STAGES - 1) * sizeof (dest_reg [0]));
+    memmove (result_stage + 1, result_stage, (STAGES - 1) * sizeof (result_stage [0]));
+    INSERT_NOP (IF1);
+    ++cycles;
+  }
+
+  void FLUSH (enum pipestage STAGE)
+  {
+    INSERT_NOP (STAGE);
+    ++flushes;
+  }
+
+  void BUBBLE ()
+  {
+    ADVANCE_PIPELINE ();
+    ++bubbles;
+  }
+
+  // STAGE is the stage in which REG is read
+  void RREAD (enum pipestage STAGE, enum regid REG)
+  {
+    if (REG == ZERO)
+      return;
+
+    for (enum pipestage writer = IF1; writer < STAGE; ++writer) // Find the first writer on whose result we're dependent
+      if (dest_reg [writer] == REG) {
+        while (++writer < STAGE) // and run him through the stage after which his result is available
+          BUBBLE ();
+        break;
+      }
+  }
+
+  // STAGE is the first stage in which the value in REG is available
+  void RWRITE (enum pipestage STAGE, enum regid REG) {
+  }
+
+  /// Begin program execution
+  // Initialize the pipeline
+  for (enum pipestage stage = IF1; stage < STAGES; ++stage)
+    INSERT_NOP (stage);
 
   // Main loop
   while (1) {
-    uint32_t instr  = Fetch(pc);
-    reg [ZERO] = 0; // $zero
+    // IF1/2 operations
+    uint32_t instr = Fetch(pc);
+    reg [ZERO] = 0;
     pc += 4;
     ++count;
 
-    uint8_t  opcode = BITRANGE (instr, 26, 32);
-    uint8_t  rs     = BITRANGE (instr, 21, 26);
-    uint8_t  rt     = BITRANGE (instr, 16, 21);
-    uint8_t  rd     = BITRANGE (instr, 11, 16);
-    uint8_t  shamt  = BITRANGE (instr, 6, 11);
-    uint8_t  funct  = BITRANGE (instr, 0, 6);
-    uint16_t uimm   = BITRANGE (instr, 0, 16);
-    int16_t  simm   = SIGN_EXTEND (uimm, 16);
-    uint32_t addr   = BITRANGE (instr, 0, 26);
+    // ID operations
+    uint8_t  opcode = bitrange (instr, 26, 32);
+    uint8_t  rs     = bitrange (instr, 21, 26);
+    uint8_t  rt     = bitrange (instr, 16, 21);
+    uint8_t  rd     = bitrange (instr, 11, 16);
+    uint8_t  shamt  = bitrange (instr, 6, 11);
+    uint8_t  funct  = bitrange (instr, 0, 6);
+    uint16_t uimm   = bitrange (instr, 0, 16);
+    int16_t  simm   = sign_extend (uimm, 16);
+    uint32_t addr   = bitrange (instr, 0, 26);
     uint32_t jaddr  = (pc & 0xf0000000) + addr * 4;
     uint32_t baddr  = pc + simm * 4;
 
+    // ID (via RREAD) through WB operations
     switch (opcode)
     {
       case FUNCTION:
         switch (funct)
         {
           case SLL:
-            RREAD (rs);
+            RREAD (EXE1, rs);
             reg [rd] = reg [rs] << shamt;
-            RWRITE (rd);
+            RWRITE (MEM1, rd);
             break;
 
           case SRA:
-            RREAD (rs);
-            reg [rd] = SIGN_EXTEND (reg [rs] >> shamt, 32 - shamt);
-            RWRITE (rd);
+            RREAD (EXE1, rs);
+            reg [rd] = sign_extend (reg [rs] >> shamt, 32 - shamt);
+            RWRITE (MEM1, rd);
             break;
 
           case JR:
-            RREAD (rs);
+            RREAD (ID, rs);
             pc = reg [rs];
             break;
 
           case MFHI:
-            RREAD (HI);
-            reg [rd] = reg [HI];
-            RWRITE (rd);
+            RREAD (EXE1, HILO);
+            reg [rd] = hi;
+            RWRITE (EXE2, rd);
             break;
 
           case MFLO:
-            RREAD (LO);
-            reg [rd] = reg [LO];
-            RWRITE (rd);
+            RREAD (EXE1, HILO);
+            reg [rd] = lo;
+            RWRITE (EXE2, rd);
             break;
 
           case MULT:
-            RREAD (rs);
-            RREAD (rt);
+            RREAD (EXE1, rs);
+            RREAD (EXE1, rt);
             uint64_t wide = reg [rs] * reg [rt];
-            reg [LO] = wide & 0xffffffff;
-            reg [HI] = wide >> 32;
-            RWRITE (LO);
-            RWRITE (HI);
+            lo = wide & 0xffffffff;
+            hi = wide >> 32;
+            RWRITE (MEM1, HILO);
             break;
 
           case DIV:
-            RREAD (rs);
-            RREAD (rt);
+            RREAD (EXE1, rs);
+            RREAD (EXE1, rt);
             if (reg [rt] == 0) {
               fprintf (stderr, "division by zero: pc = 0x%"PRIx32"\n", pc - 4);
               goto halt;
             }
             else {
-              reg [LO] = reg [rs] / reg [rt];
-              reg [HI] = reg [rs] % reg [rt];
+              lo = reg [rs] / reg [rt];
+              hi = reg [rs] % reg [rt];
             }
-            RWRITE (LO);
-            RWRITE (HI);
+            RWRITE (MEM1, HILO);
             break;
 
           case ADDU:
-            RREAD (rs);
-            RREAD (rt);
+            RREAD (EXE1, rs);
+            RREAD (EXE1, rt);
             reg [rd] = reg [rs] + reg [rt];
-            RWRITE (rd);
+            RWRITE (MEM1, rd);
             break;
 
           case SUBU:
-            RREAD (rs);
-            RREAD (rt);
+            RREAD (EXE1, rs);
+            RREAD (EXE1, rt);
             reg [rd] = reg [rs] - reg [rt];
-            RWRITE (rd);
+            RWRITE (MEM1, rd);
             break;
 
           case SLT:
-            RREAD (rs);
-            RREAD (rt);
+            RREAD (EXE1, rs);
+            RREAD (EXE1, rt);
             reg [rd] = ((int32_t) reg [rs] < (int32_t) reg [rt] ? 1 : 0);
-            RWRITE (rd);
+            RWRITE (MEM1, rd);
             break;
 
           default:
@@ -301,38 +357,38 @@ static void Interpret (uint32_t start)
       case JAL:
         reg [31] = pc;
         pc = jaddr;
-        RWRITE (31);
+        RWRITE (EXE1, 31);
         break;
 
       case BEQ:
-        RREAD (rs);
-        RREAD (rt);
+        RREAD (ID, rs);
+        RREAD (ID, rt);
         if (reg [rs] == reg [rt])
           pc = baddr;
         break;
 
       case BNE:
-        RREAD (rs);
-        RREAD (rt);
+        RREAD (ID, rs);
+        RREAD (ID, rt);
         if (reg [rs] != reg [rt])
           pc = baddr;
         break;
 
       case ADDIU:
-        RREAD (rs);
+        RREAD (EXE1, rs);
         reg [rt] = reg [rs] + simm;
-        RWRITE (rt);
+        RWRITE (MEM1, rt);
         break;
 
       case ANDI:
-        RREAD (rs);
+        RREAD (EXE1, rs);
         reg [rt] = reg [rs] & uimm;
-        RWRITE (rt);
+        RWRITE (EXE2, rt);
         break;
 
       case LUI:
         reg [rt] = uimm << 16;
-        RWRITE (rt);
+        RWRITE (EXE2, rt);
         break;
 
       case TRAP:
@@ -343,7 +399,7 @@ static void Interpret (uint32_t start)
             break;
 
           case PRINT:
-            RREAD (rs);
+            RREAD (EXE1, rs);
             printf (" %d", reg [rs]);
             break;
 
@@ -353,7 +409,7 @@ static void Interpret (uint32_t start)
             int32_t input;
             scanf ("%"PRIi32, &input);
             reg [rt] = input;
-            RWRITE (rt);
+            RWRITE (MEM1, rt);
             break;
 
           case STOP:
@@ -366,14 +422,14 @@ static void Interpret (uint32_t start)
         break;
 
       case LW:
-        RREAD (rs);
+        RREAD (EXE1, rs);
         reg [rt] = LoadWord (reg [rs] + simm);
-        RWRITE (rt);
+        RWRITE (WB, rt);
         break;
 
       case SW:
-        RREAD (rs);
-        RREAD (rt);
+        RREAD (EXE1, rs);
+        RREAD (MEM1, rt);
         StoreWord (reg [rt], reg [rs] + simm);
         break;
 
