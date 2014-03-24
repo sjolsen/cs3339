@@ -231,7 +231,7 @@ static void Interpret (uint32_t start)
     for (enum pipestage writer = ID + 1; writer < STAGES; ++writer) // Find the latest writer on whose result we're dependent
       if (dest_reg [writer] == REG) {
         int cycles_to_available = result_stage [writer] - writer;
-        int cycles_to_needed    = STAGE - ID;
+        int cycles_to_needed = STAGE - ID;
         while (cycles_to_available > cycles_to_needed) { // and execute until we can forward its result
           BUBBLE ();
           --cycles_to_available;
@@ -460,7 +460,8 @@ static void Interpret (uint32_t start)
   }
 
 halt:
-  printf ("cycles = %"PR_INTEGER"\n"
+  printf ("\n"
+          "cycles = %"PR_INTEGER"\n"
           "bubbles = %"PR_INTEGER"\n"
           "flushes = %"PR_INTEGER"\n"
           "instructions = %"PR_INTEGER"\n"
