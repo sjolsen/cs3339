@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <inttypes.h>
 #include <limits.h>
 #include <string.h>
@@ -185,7 +186,8 @@ static void Interpret (uint32_t start)
   uint32_t lo, hi;
 
   /// Control data
-  enum regid     dest_reg     [STAGES] = {};
+  uint32_t pipeline [STAGES] = {};
+  enum regid dest_reg [STAGES] = {};
   enum pipestage result_stage [STAGES] = {};
 
   /// Statistical data
@@ -197,28 +199,29 @@ static void Interpret (uint32_t start)
   /// Control functions
   void INSERT_NOP (enum pipestage STAGE)
   {
+    pipeline [STAGE] = 0;
     dest_reg [STAGE] = ZERO;
     result_stage [STAGE] = IF1;
   }
 
-  void ADVANCE_PIPELINE ()
+  void ADVANCE_PIPELINE (enum pipestage FROM_STAGE)
   {
-    memmove (dest_reg + 1, dest_reg, (STAGES - 1) * sizeof (dest_reg [0]));
-    memmove (result_stage + 1, result_stage, (STAGES - 1) * sizeof (result_stage [0]));
-    INSERT_NOP (IF1);
+    memmove (pipeline     + FROM_STAGE + 1, pipeline     + FROM_STAGE, (STAGES - (FROM_STAGE + 1)) * sizeof (pipeline [0]));
+    memmove (dest_reg     + FROM_STAGE + 1, dest_reg     + FROM_STAGE, (STAGES - (FROM_STAGE + 1)) * sizeof (dest_reg [0]));
+    memmove (result_stage + FROM_STAGE + 1, result_stage + FROM_STAGE, (STAGES - (FROM_STAGE + 1)) * sizeof (result_stage [0]));
+    INSERT_NOP (FROM_STAGE);
     ++cycles;
   }
 
-  void FLUSH ()
+  void FLUSH (enum pipestage STAGE)
   {
-    INSERT_NOP (IF2);
-    ADVANCE_PIPELINE ();
+    INSERT_NOP (STAGE);
     ++flushes;
   }
 
   void BUBBLE ()
   {
-    ADVANCE_PIPELINE ();
+    ADVANCE_PIPELINE (EXE1);
     ++bubbles;
   }
 
@@ -230,11 +233,11 @@ static void Interpret (uint32_t start)
 
     for (enum pipestage writer = ID + 1; writer < STAGES; ++writer) // Find the latest writer on whose result we're dependent
       if (dest_reg [writer] == REG) {
-        int cycles_to_available = result_stage [writer] - writer;
-        int cycles_to_needed    = STAGE - ID;
-        while (cycles_to_available > cycles_to_needed) { // and execute until we can forward its result
+        int cycles_until_available = result_stage [writer] - writer;
+        int cycles_until_needed = STAGE - ID;
+        while (cycles_until_available > cycles_until_needed) { // and execute until we can forward its result
           BUBBLE ();
-          --cycles_to_available;
+          --cycles_until_available;
         }
         break;
       }
@@ -247,31 +250,36 @@ static void Interpret (uint32_t start)
   }
 
   /// Begin program execution
-  // Initialize the pipeline
-  for (int i = 0; i < STAGES - 1; ++i)
-    ADVANCE_PIPELINE ();
-
-  // Main loop
-  while (1) {
+  bool cont = true;
+  while (true) {
     // IF1/2 operations
-    uint32_t instr = Fetch (pc);
-    reg [ZERO] = 0;
-    pc += 4;
-    ++count;
-    ADVANCE_PIPELINE ();
+    if (cont) {
+      pipeline [IF1] = Fetch (pc);
+      reg [ZERO] = 0;
+      pc += 4;
+      ++count;
+    }
+    else {
+      for (enum pipestage stage = IF1; stage < STAGES; ++stage)
+        if (pipeline [stage] != 0) // Remaining instructions; flush the pipeline
+          break;
+        else
+          goto halt;
+    }
 
     // ID operations
-    uint8_t  opcode = bitrange (instr, 26, 32);
-    uint8_t  rs     = bitrange (instr, 21, 26);
-    uint8_t  rt     = bitrange (instr, 16, 21);
-    uint8_t  rd     = bitrange (instr, 11, 16);
-    uint8_t  shamt  = bitrange (instr, 6, 11);
-    uint8_t  funct  = bitrange (instr, 0, 6);
-    uint16_t uimm   = bitrange (instr, 0, 16);
-    int16_t  simm   = sign_extend (uimm, 16);
-    uint32_t addr   = bitrange (instr, 0, 26);
-    uint32_t jaddr  = (pc & 0xf0000000) + addr * 4;
-    uint32_t baddr  = pc + simm * 4;
+    uint32_t ID_instr = pipeline [ID];
+    uint8_t  opcode   = bitrange (ID_instr, 26, 32);
+    uint8_t  rs       = bitrange (ID_instr, 21, 26);
+    uint8_t  rt       = bitrange (ID_instr, 16, 21);
+    uint8_t  rd       = bitrange (ID_instr, 11, 16);
+    uint8_t  shamt    = bitrange (ID_instr, 6, 11);
+    uint8_t  funct    = bitrange (ID_instr, 0, 6);
+    uint16_t uimm     = bitrange (ID_instr, 0, 16);
+    int16_t  simm     = sign_extend (uimm, 16);
+    uint32_t addr     = bitrange (ID_instr, 0, 26);
+    uint32_t jaddr    = (pc & 0xf0000000) + addr * 4;
+    uint32_t baddr    = pc + simm * 4;
 
     // ID (via RREAD) through WB operations
     switch (opcode)
@@ -294,8 +302,8 @@ static void Interpret (uint32_t start)
           case JR:
             RREAD (ID, rs);
             pc = reg [rs];
-            FLUSH ();
-            FLUSH ();
+            FLUSH (IF2);
+            FLUSH (IF1);
             break;
 
           case MFHI:
@@ -324,7 +332,7 @@ static void Interpret (uint32_t start)
             RREAD (EXE1, rt);
             if (reg [rt] == 0) {
               fprintf (stderr, "division by zero: pc = 0x%"PRIx32"\n", pc - 4);
-              goto halt;
+              cont = false;
             }
             else {
               lo = reg [rs] / reg [rt];
@@ -356,22 +364,22 @@ static void Interpret (uint32_t start)
 
           default:
             fprintf (stderr, "unimplemented instruction: pc = 0x%"PRIx32"\n", pc - 4);
-            goto halt;
+            cont = false;
         }
         break;
 
       case J:
         pc = jaddr;
-        FLUSH ();
-        FLUSH ();
+        FLUSH (IF2);
+        FLUSH (IF1);
         break;
 
       case JAL:
         reg [31] = pc;
         pc = jaddr;
         RWRITE (EXE1, 31);
-        FLUSH ();
-        FLUSH ();
+        FLUSH (IF2);
+        FLUSH (IF1);
         break;
 
       case BEQ:
@@ -379,8 +387,8 @@ static void Interpret (uint32_t start)
         RREAD (ID, rt);
         if (reg [rs] == reg [rt]) {
           pc = baddr;
-          FLUSH ();
-          FLUSH ();
+          FLUSH (IF2);
+          FLUSH (IF1);
         }
         break;
 
@@ -389,8 +397,8 @@ static void Interpret (uint32_t start)
         RREAD (ID, rt);
         if (reg [rs] != reg [rt]) {
           pc = baddr;
-          FLUSH ();
-          FLUSH ();
+          FLUSH (IF2);
+          FLUSH (IF1);
         }
         break;
 
@@ -433,11 +441,11 @@ static void Interpret (uint32_t start)
             break;
 
           case STOP:
-            goto halt;
+            cont = false;
 
           default:
             fprintf (stderr, "unimplemented trap: pc = 0x%"PRIx32"\n", pc - 4);
-            goto halt;
+            cont = false;
         }
         break;
 
@@ -455,8 +463,10 @@ static void Interpret (uint32_t start)
 
       default:
         fprintf (stderr, "unimplemented instruction: pc = 0x%"PRIx32"\n", pc - 4);
-        goto halt;
+        cont = false;
     }
+
+    ADVANCE_PIPELINE (IF1);
   }
 
 halt:
