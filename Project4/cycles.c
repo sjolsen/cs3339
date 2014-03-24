@@ -149,36 +149,36 @@ integer funstats [] = {
 };
 
 struct enummap {
-  const char* desc;
   int value;
+  const char* desc;
 };
 
 static
 const struct enummap opnames [] = {
-  {"J",    0x02},
-  {"JAL",  0x03},
-  {"BEQ",  0x04},
-  {"BNE",  0x05},
-  {"ADDIU",0x09},
-  {"ANDI", 0x0C},
-  {"LUI",  0x0F},
-  {"TRAP", 0x1A},
-  {"LW",   0x23},
-  {"SW",   0x2B}
+  {J,     "J"},
+  {JAL,   "JAL"},
+  {BEQ,   "BEQ"},
+  {BNE,   "BNE"},
+  {ADDIU, "ADDIU"},
+  {ANDI,  "ANDI"},
+  {LUI,   "LUI"},
+  {TRAP,  "TRAP"},
+  {LW,    "LW"},
+  {SW,    "SW"}
 };
 
 static
 const struct enummap funnames [] = {
-  {"SLL",  0x00},
-  {"SRA",  0x03},
-  {"JR",   0x08},
-  {"MFHI", 0x10},
-  {"MFLO", 0x12},
-  {"MULT", 0x18},
-  {"DIV",  0x1A},
-  {"ADDU", 0x21},
-  {"SUBU", 0x23},
-  {"SLT",  0x2a}
+  {SLL,  "SLL"},
+  {SRA,  "SRA"},
+  {JR,   "JR"},
+  {MFHI, "MFHI"},
+  {MFLO, "MFLO"},
+  {MULT, "MULT"},
+  {DIV,  "DIV"},
+  {ADDU, "ADDU"},
+  {SUBU, "SUBU"},
+  {SLT,  "SLT"}
 };
 
 enum trapcode {
@@ -292,13 +292,15 @@ static void Interpret (uint32_t start)
     if (REG == ZERO)
       return;
 
-    for (enum pipestage writer = ID + 1; writer < STAGES; ++writer) // Find the latest writer on whose result we're dependent
+    // Find the latest writer on whose result we're dependent
+    for (enum pipestage writer = ID + 1; writer < STAGES; ++writer)
       if (dest_reg [writer] == REG) {
-        int cycles_to_available = result_stage [writer] - writer;
-        int cycles_to_needed = STAGE - ID;
-        while (cycles_to_available > cycles_to_needed) { // and execute until we can forward its result
+        int cycles_until_available = result_stage [writer] - writer;
+        int cycles_until_needed = STAGE - ID;
+        // and execute until we can forward its result
+        while (cycles_until_available > cycles_until_needed) {
           BUBBLE ();
-          --cycles_to_available;
+          --cycles_until_available;
         }
         break;
       }
