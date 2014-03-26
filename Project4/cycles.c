@@ -307,7 +307,8 @@ static void Interpret (uint32_t start)
   }
 
   // STAGE is the first stage in which the value in REG is available
-  void RWRITE (enum pipestage STAGE, enum regid REG) {
+  void RWRITE (enum pipestage STAGE, enum regid REG)
+  {
     dest_reg [ID] = REG;
     result_stage [ID] = STAGE;
   }
