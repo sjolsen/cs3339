@@ -326,7 +326,7 @@ static void Interpret (uint32_t start)
             uint64_t wide = reg [rs] * reg [rt];
             lo = wide & 0xffffffff;
             hi = wide >> 32;
-            RWRITE (MEM1, HILO);
+            RWRITE (WB, HILO);
             break;
 
           case DIV:
@@ -340,7 +340,7 @@ static void Interpret (uint32_t start)
               lo = reg [rs] / reg [rt];
               hi = reg [rs] % reg [rt];
             }
-            RWRITE (MEM1, HILO);
+            RWRITE (WB, HILO);
             break;
 
           case ADDU:
