@@ -181,6 +181,18 @@ const struct enummap funnames [] = {
   {SLT,  "SLT"}
 };
 
+static
+integer branchstats [] = {
+  [BEQ] = 0,
+  [BNE] = 0
+};
+
+static
+const struct enummap branchnames [] = {
+  {BEQ, "BEQ"},
+  {BNE, "BNE"}
+};
+
 enum trapcode {
   NEWLINE = 0x00,
   PRINT   = 0x01,
@@ -240,6 +252,15 @@ enum pipestage {
 
 static void Interpret (uint32_t start)
 {
+  /* This interpreter simulates a pipelined MIPS processor. It does not emulate
+   * a pipeline structure for the purpose of execution; rather, it determines
+   * what measurements would result if it did. Specifically, rather than
+   * splitting each instruction across multiple stages of execution, it executes
+   * each instruction atomically and keeps track of what data dependencies would
+   * exist in a real pipelined processor. As a result, no meaningful data is
+   * represented for the IF1 and IF2 stages, since all control is performed from
+   * the perspective of the ID stage. */
+
   /// Registers
   uint32_t pc = start;
   uint32_t reg [REGS] = {
@@ -447,6 +468,7 @@ static void Interpret (uint32_t start)
         RREAD (ID, rs);
         RREAD (ID, rt);
         if (reg [rs] == reg [rt]) {
+          ++branchstats [BEQ];
           pc = baddr;
           FLUSH ();
           FLUSH ();
@@ -457,6 +479,7 @@ static void Interpret (uint32_t start)
         RREAD (ID, rs);
         RREAD (ID, rt);
         if (reg [rs] != reg [rt]) {
+          ++branchstats [BNE];
           pc = baddr;
           FLUSH ();
           FLUSH ();
@@ -532,16 +555,22 @@ halt:
   printf ("\n"
           "cycles = %"PR_INTEGER"\n"
           "bubbles = %"PR_INTEGER"\n"
-          "flushes = %"PR_INTEGER"\n"
-          "instructions = %"PR_INTEGER"\n"
-          "cycles - 8 - bubbles - flushes = %"PR_INTEGER"\n",
-          cycles, bubbles, flushes, count, cycles - 8 - bubbles - flushes);
+          "flushes = %"PR_INTEGER"\n",
+          cycles, bubbles, flushes);
 
-  printf ("\n");
+  printf ("\nInstructions: %"PR_INTEGER"\n"
+          "cycles - 8 - bubbles - flushes = %"PR_INTEGER"\n",
+          count, cycles - 8 - bubbles - flushes);
+
+  printf ("\nOperations:\n");
   for (int i = 0; i < ARRAYLEN (opnames); ++i)
     printf ("%5s : %"PR_INTEGER"\n", opnames [i].desc, opstats [opnames [i].value]);
   for (int i = 0; i < ARRAYLEN (funnames); ++i)
     printf ("%5s : %"PR_INTEGER"\n", funnames [i].desc, funstats [funnames [i].value]);
+
+  printf ("\nBranches taken:\n");
+  for (int i = 0; i < ARRAYLEN (branchnames); ++i)
+    printf ("%5s : %"PR_INTEGER"\n", branchnames [i].desc, branchstats [branchnames [i].value]);
 }
 
 
