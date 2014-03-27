@@ -11,8 +11,6 @@
 #include <limits.h>
 #include <string.h>
 
-#define ARRAYLEN(NAME) (sizeof(NAME)/sizeof(*(NAME)))
-
 typedef intmax_t integer;
 #define PR_INTEGER PRIiMAX
 
@@ -106,21 +104,6 @@ enum opcode {
   SW       = 0x2B
 };
 
-static
-integer opstats [] = {
-  [FUNCTION] = 0,
-  [J]        = 0,
-  [JAL]      = 0,
-  [BEQ]      = 0,
-  [BNE]      = 0,
-  [ADDIU]    = 0,
-  [ANDI]     = 0,
-  [LUI]      = 0,
-  [TRAP]     = 0,
-  [LW]       = 0,
-  [SW]       = 0
-};
-
 enum funcode {
   SLL  = 0x00,
   SRA  = 0x03,
@@ -132,65 +115,6 @@ enum funcode {
   ADDU = 0x21,
   SUBU = 0x23,
   SLT  = 0x2a
-};
-
-static
-integer funstats [] = {
-  [SLL]  = 0,
-  [SRA]  = 0,
-  [JR]   = 0,
-  [MFHI] = 0,
-  [MFLO] = 0,
-  [MULT] = 0,
-  [DIV]  = 0,
-  [ADDU] = 0,
-  [SUBU] = 0,
-  [SLT]  = 0
-};
-
-struct enummap {
-  int value;
-  const char* desc;
-};
-
-static
-const struct enummap opnames [] = {
-  {J,     "J"},
-  {JAL,   "JAL"},
-  {BEQ,   "BEQ"},
-  {BNE,   "BNE"},
-  {ADDIU, "ADDIU"},
-  {ANDI,  "ANDI"},
-  {LUI,   "LUI"},
-  {TRAP,  "TRAP"},
-  {LW,    "LW"},
-  {SW,    "SW"}
-};
-
-static
-const struct enummap funnames [] = {
-  {SLL,  "SLL"},
-  {SRA,  "SRA"},
-  {JR,   "JR"},
-  {MFHI, "MFHI"},
-  {MFLO, "MFLO"},
-  {MULT, "MULT"},
-  {DIV,  "DIV"},
-  {ADDU, "ADDU"},
-  {SUBU, "SUBU"},
-  {SLT,  "SLT"}
-};
-
-static
-integer branchstats [] = {
-  [BEQ] = 0,
-  [BNE] = 0
-};
-
-static
-const struct enummap branchnames [] = {
-  {BEQ, "BEQ"},
-  {BNE, "BNE"}
 };
 
 enum trapcode {
@@ -290,13 +214,11 @@ static void Interpret (uint32_t start)
   {
     memmove (dest_reg + 1, dest_reg, (STAGES - 1) * sizeof (dest_reg [0]));
     memmove (result_stage + 1, result_stage, (STAGES - 1) * sizeof (result_stage [0]));
-    INSERT_NOP (IF1);
     ++cycles;
   }
 
   void FLUSH ()
   {
-    INSERT_NOP (IF2);
     ADVANCE_PIPELINE ();
     ++flushes;
   }
@@ -362,11 +284,9 @@ static void Interpret (uint32_t start)
     uint32_t baddr  = pc + simm * 4;
 
     // ID (via RREAD) through WB operations
-    ++opstats [opcode];
     switch (opcode)
     {
       case FUNCTION:
-        ++funstats [funct];
         switch (funct)
         {
           case SLL:
@@ -457,9 +377,9 @@ static void Interpret (uint32_t start)
         break;
 
       case JAL:
-        reg [31] = pc;
+        reg [RA] = pc;
         pc = jaddr;
-        RWRITE (EXE1, 31);
+        RWRITE (EXE1, RA);
         FLUSH ();
         FLUSH ();
         break;
@@ -468,7 +388,6 @@ static void Interpret (uint32_t start)
         RREAD (ID, rs);
         RREAD (ID, rt);
         if (reg [rs] == reg [rt]) {
-          ++branchstats [BEQ];
           pc = baddr;
           FLUSH ();
           FLUSH ();
@@ -479,7 +398,6 @@ static void Interpret (uint32_t start)
         RREAD (ID, rs);
         RREAD (ID, rt);
         if (reg [rs] != reg [rt]) {
-          ++branchstats [BNE];
           pc = baddr;
           FLUSH ();
           FLUSH ();
@@ -557,20 +475,6 @@ halt:
           "bubbles = %"PR_INTEGER"\n"
           "flushes = %"PR_INTEGER"\n",
           cycles, bubbles, flushes);
-
-  printf ("\nInstructions: %"PR_INTEGER"\n"
-          "cycles - 8 - bubbles - flushes = %"PR_INTEGER"\n",
-          count, cycles - 8 - bubbles - flushes);
-
-  printf ("\nOperations:\n");
-  for (int i = 0; i < ARRAYLEN (opnames); ++i)
-    printf ("%5s : %"PR_INTEGER"\n", opnames [i].desc, opstats [opnames [i].value]);
-  for (int i = 0; i < ARRAYLEN (funnames); ++i)
-    printf ("%5s : %"PR_INTEGER"\n", funnames [i].desc, funstats [funnames [i].value]);
-
-  printf ("\nBranches taken:\n");
-  for (int i = 0; i < ARRAYLEN (branchnames); ++i)
-    printf ("%5s : %"PR_INTEGER"\n", branchnames [i].desc, branchstats [branchnames [i].value]);
 }
 
 
