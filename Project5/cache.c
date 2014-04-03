@@ -37,11 +37,23 @@ uint32_t sign_extend (uint32_t value,
 
 
 enum {
-  MEMSIZE = 1048576
+  MEMSIZE       = 1048576,
+  ASSOCIATIVITY = 4,
+  BLOCK_SIZE    = 16,
+  SETS          = 8
 };
 
 static uint32_t icount, *instruction;
 static uint32_t mem [MEMSIZE / 4];
+
+void CLOAD (uint32_t address)
+{
+}
+
+// STAGE is the first stage in which the value in REG is available
+void CSTORE (uint32_t address)
+{
+}
 
 
 
@@ -178,18 +190,7 @@ static void Interpret (uint32_t start)
   /// Control data
 
   /// Statistical data
-  integer count   = 0;
-
-  /// Control functions
-  // STAGE is the stage in which REG is read
-  void RREAD (enum regid REG)
-  {
-  }
-
-  // STAGE is the first stage in which the value in REG is available
-  void RWRITE (enum regid REG)
-  {
-  }
+  integer count = 0;
 
   /// Begin program execution
   while (1) {
@@ -219,46 +220,33 @@ static void Interpret (uint32_t start)
         switch (funct)
         {
           case SLL:
-            RREAD (rs);
             reg [rd] = reg [rs] << shamt;
-            RWRITE (rd);
             break;
 
           case SRA:
-            RREAD (rs);
             reg [rd] = sign_extend (reg [rs] >> shamt, 32 - shamt);
-            RWRITE (rd);
             break;
 
           case JR:
-            RREAD (rs);
             pc = reg [rs];
             break;
 
           case MFHI:
-            RREAD (HILO);
             reg [rd] = hi;
-            RWRITE (rd);
             break;
 
           case MFLO:
-            RREAD (HILO);
             reg [rd] = lo;
-            RWRITE (rd);
             break;
 
           case MULT:
-            RREAD (rs);
-            RREAD (rt);
+            ; // C requires a statement after a label
             uint64_t wide = reg [rs] * reg [rt];
             lo = wide & 0xffffffff;
             hi = wide >> 32;
-            RWRITE (HILO);
             break;
 
           case DIV:
-            RREAD (rs);
-            RREAD (rt);
             if (reg [rt] == 0) {
               fprintf (stderr, "division by zero: pc = 0x%"PRIx32"\n", pc - 4);
               goto halt;
@@ -267,28 +255,18 @@ static void Interpret (uint32_t start)
               lo = reg [rs] / reg [rt];
               hi = reg [rs] % reg [rt];
             }
-            RWRITE (HILO);
             break;
 
           case ADDU:
-            RREAD (rs);
-            RREAD (rt);
             reg [rd] = reg [rs] + reg [rt];
-            RWRITE (rd);
             break;
 
           case SUBU:
-            RREAD (rs);
-            RREAD (rt);
             reg [rd] = reg [rs] - reg [rt];
-            RWRITE (rd);
             break;
 
           case SLT:
-            RREAD (rs);
-            RREAD (rt);
             reg [rd] = ((int32_t) reg [rs] < (int32_t) reg [rt] ? 1 : 0);
-            RWRITE (rd);
             break;
 
           default:
@@ -304,38 +282,28 @@ static void Interpret (uint32_t start)
       case JAL:
         reg [RA] = pc;
         pc = jaddr;
-        RWRITE (RA);
         break;
 
       case BEQ:
-        RREAD (rs);
-        RREAD (rt);
         if (reg [rs] == reg [rt])
           pc = baddr;
         break;
 
       case BNE:
-        RREAD (rs);
-        RREAD (rt);
         if (reg [rs] != reg [rt])
           pc = baddr;
         break;
 
       case ADDIU:
-        RREAD (rs);
         reg [rt] = reg [rs] + simm;
-        RWRITE (rt);
         break;
 
       case ANDI:
-        RREAD (rs);
         reg [rt] = reg [rs] & uimm;
-        RWRITE (rt);
         break;
 
       case LUI:
         reg [rt] = uimm << 16;
-        RWRITE (rt);
         break;
 
       case TRAP:
@@ -346,7 +314,6 @@ static void Interpret (uint32_t start)
             break;
 
           case PRINT:
-            RREAD (rs);
             printf (" %d", reg [rs]);
             break;
 
@@ -356,7 +323,6 @@ static void Interpret (uint32_t start)
             int32_t input;
             scanf ("%"PRIi32, &input);
             reg [rt] = input;
-            RWRITE (rt);
             break;
 
           case STOP:
@@ -369,14 +335,12 @@ static void Interpret (uint32_t start)
         break;
 
       case LW:
-        RREAD (rs);
+        CLOAD (reg [rs] + simm);
         reg [rt] = LoadWord (reg [rs] + simm);
-        RWRITE (rt);
         break;
 
       case SW:
-        RREAD (rs);
-        RREAD (rt);
+        CSTORE (reg [rs] + simm);
         StoreWord (reg [rt], reg [rs] + simm);
         break;
 
