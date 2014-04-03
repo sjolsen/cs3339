@@ -75,23 +75,64 @@ enum {
   DIRTY = 0b10
 };
 
-static const uint32_t offset_bits = log2ceil (BLOCK_SIZE);
-static const uint32_t index_bits  = log2ceil (BLOCKS);
-static const uint32_t tag_bits    = 32 - (index_bits + offset_bits);
-
-static const uint32_t offset_mask = (uint32_t)-1 >> (32 - offset_bits);
-static const uint32_t tag_mask    = (uint32_t)-1 << (32 - tag_bits);
-static const uint32_t index_bits  = ~(offset_bits | tag_mask);
-
 struct cacheline {
   uint16_t flags;
   uint16_t index;
   uint32_t tag;
 };
 
-static cacheline dcache_meta [BLOCKS] = {};
+static const uint32_t offset_bits = log2ceil (BLOCK_SIZE);
+static const uint32_t index_bits  = log2ceil (BLOCKS);
 
-static uint32_t dcache [CACHE_SIZE / 4];
+static inline
+uint32_t offset_of (uint32_t address)
+{
+  return bitrange (address, 0, offset_bits);
+}
+
+static inline
+uint32_t index_of (uint32_t address)
+{
+  return bitrange (address, offset_bits, offset_bits + index_bits);
+}
+
+static inline
+uint32_t tag_of (uint32_t address)
+{
+  return bitrange (address, offset_bits + index_bits, 32);
+}
+
+
+
+static cacheline dcache_meta [BLOCKS] = {};
+static uint32_t  dcache [CACHE_SIZE / 4];
+
+static
+bool get_block (uint32_t address, struct cacheline* (*ret_block))
+/// Returns whether the access hit; and a pointer to the cacheline in
+/// `ret_block'. Dirty contents will be written out, but the caller is
+/// responsible for loading the new data.
+{
+  (*ret_block) = NULL;
+  struct cacheline* set_begin = index_of (address);
+  struct cacheline* set_end   = set_begin + ASSOCIATIVITY;
+
+  // Look for a block that has the right data
+  for (struct cacheline* block = set_begin; block != set_end; ++block)
+    if ((block->flags & VALID) && (block->tag == tag_of (address))) {
+      (*ret_block) = block;
+      return true;
+    }
+
+  // Look for an invalid block
+  for (struct cacheline* block = set_begin; block != set_end; ++block)
+    if (!(block->flags & VALID)) {
+      (*ret_block) = block;
+      return false;
+    }
+
+  // Get a random block and write back the contents if dirty
+}
 
 static
 void CLOAD (uint32_t address)
