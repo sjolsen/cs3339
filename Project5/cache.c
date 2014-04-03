@@ -34,6 +34,21 @@ uint32_t sign_extend (uint32_t value,
     return value;
 }
 
+static inline
+uint_fast8_t log2ceil (uint32_t value)
+{
+  uint32_t mask = 0x80000000;
+  uint_fast8_t result = 32;
+  value = value - 1;
+
+  while (mask != 0) {
+    if (value & mask)
+      return result;
+    mask >>= 1;
+    --result;
+  }
+}
+
 
 
 enum {
@@ -60,23 +75,30 @@ enum {
   DIRTY = 0b10
 };
 
+static const uint32_t offset_bits = log2ceil (BLOCK_SIZE);
+static const uint32_t index_bits  = log2ceil (BLOCKS);
+static const uint32_t tag_bits    = 32 - (index_bits + offset_bits);
+
+static const uint32_t offset_mask = (uint32_t)-1 >> (32 - offset_bits);
+static const uint32_t tag_mask    = (uint32_t)-1 << (32 - tag_bits);
+static const uint32_t index_bits  = ~(offset_bits | tag_mask);
+
 struct cacheline {
   uint16_t flags;
   uint16_t index;
   uint32_t tag;
 };
 
-static
-cacheline dcache_meta [BLOCKS] = {};
+static cacheline dcache_meta [BLOCKS] = {};
+
+static uint32_t dcache [CACHE_SIZE / 4];
 
 static
-uint32_t dcache [CACHE_SIZE / 4];
-
 void CLOAD (uint32_t address)
 {
 }
 
-// STAGE is the first stage in which the value in REG is available
+static
 void CSTORE (uint32_t address)
 {
 }
