@@ -29,7 +29,7 @@ uint32_t sign_extend (uint32_t value,
                       uint_fast8_t bits)
 {
   if (value & (1 << (bits - 1))) // Highest bit 1
-    return value | (-1 << bits);
+    return value | ((uint32_t)-1 << bits);
   else
     return value;
 }
@@ -37,14 +37,40 @@ uint32_t sign_extend (uint32_t value,
 
 
 enum {
-  MEMSIZE       = 1048576,
-  ASSOCIATIVITY = 4,
-  BLOCK_SIZE    = 16,
-  SETS          = 8
+  MEMSIZE = 1048576
 };
 
 static uint32_t icount, *instruction;
 static uint32_t mem [MEMSIZE / 4];
+
+
+
+enum {
+  // Parameterized constants
+  ASSOCIATIVITY = 4,
+  BLOCK_SIZE    = 16,
+  SETS          = 8,
+  // Computed constants
+  BLOCKS        = SETS * ASSOCIATIVITY,
+  CACHE_SIZE    = BLOCKS * BLOCK_SIZE
+};
+
+enum {
+  VALID = 0b01,
+  DIRTY = 0b10
+};
+
+struct cacheline {
+  uint16_t flags;
+  uint16_t index;
+  uint32_t tag;
+};
+
+static
+cacheline dcache_meta [BLOCKS] = {};
+
+static
+uint32_t dcache [CACHE_SIZE / 4];
 
 void CLOAD (uint32_t address)
 {
