@@ -7,11 +7,9 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
-#include <stdbool.h>
 #include <inttypes.h>
 #include <limits.h>
-
-#include "debug.h"
+#include <string.h>
 
 typedef intmax_t integer;
 #define PR_INTEGER PRIiMAX
@@ -39,11 +37,23 @@ uint32_t sign_extend (uint32_t value,
 
 
 enum {
-  MEMSIZE = 1048576
+  MEMSIZE       = 1048576,
+  ASSOCIATIVITY = 4,
+  BLOCK_SIZE    = 16,
+  SETS          = 8
 };
 
 static uint32_t icount, *instruction;
 static uint32_t mem [MEMSIZE / 4];
+
+void CLOAD (uint32_t address)
+{
+}
+
+// STAGE is the first stage in which the value in REG is available
+void CSTORE (uint32_t address)
+{
+}
 
 
 
@@ -163,29 +173,11 @@ enum regid {
   HILO
 };
 
-enum pipestage {
-  IF1    = 0,
-  IF2    = 1,
-  ID     = 2,
-  EXE1   = 3,
-  EXE2   = 4,
-  MEM1   = 5,
-  MEM2   = 6,
-  MEM3   = 7,
-  WB     = 8,
-  STAGES = 1 + WB - IF1
-};
-
 static void Interpret (uint32_t start)
 {
-  /* This interpreter simulates a pipelined MIPS processor. It does not emulate
-   * a pipeline structure for the purpose of execution; rather, it determines
-   * what measurements would result if it did. Specifically, rather than
-   * splitting each instruction across multiple stages of execution, it executes
-   * each instruction atomically and keeps track of what data dependencies would
-   * exist in a real pipelined processor. As a result, no meaningful data is
-   * represented for the IF1 and IF2 stages, since all control is performed from
-   * the perspective of the ID stage. */
+  /* This interpreter simulates a non-pipelined MIPS processor. Specifically, it
+   * simulates the cache behaviour of a MIPS program and reports certain
+   * statistics about that behaviour. */
 
   /// Registers
   uint32_t pc = start;
@@ -196,128 +188,30 @@ static void Interpret (uint32_t start)
   uint32_t lo, hi;
 
   /// Control data
-  uint32_t pipeline [STAGES] = {};
-  uint32_t pipeline_pc [STAGES] = {};
-  enum regid dest_reg [STAGES] = {};
-  enum pipestage result_stage [STAGES] = {};
 
   /// Statistical data
-  integer count   = 0;
-  integer cycles  = 0;
-  integer bubbles = 0;
-  integer flushes = 0;
-
-  /// Control functions
-  void DEBUG_STAGE (enum pipestage STAGE)
-  {
-    static const char* stagename [] = {
-        [IF1]  = "IF1",
-        [IF2]  = "IF2",
-        [ID]   = "ID",
-        [EXE1] = "EXE1",
-        [EXE2] = "EXE2",
-        [MEM1] = "MEM1",
-        [MEM2] = "MEM2",
-        [MEM3] = "MEM3",
-        [WB]   = "WB",
-    };
-
-    fprintf (stderr, "%4s: ", stagename [STAGE]);
-    Decode (pipeline_pc [STAGE], pipeline [STAGE]);
-  }
-
-  void INSERT_NOP (enum pipestage STAGE)
-  {
-    pipeline [STAGE]     = 0;
-    pipeline_pc [STAGE]  = 0;
-    dest_reg [STAGE]     = ZERO;
-    result_stage [STAGE] = IF1;
-  }
-
-  void ADVANCE_PIPELINE (enum pipestage FROM_STAGE)
-  {
-    memmove (dest_reg + 1, dest_reg, (STAGES - 1) * sizeof (dest_reg [0]));
-    memmove (result_stage + 1, result_stage, (STAGES - 1) * sizeof (result_stage [0]));
-    ++cycles;
-  }
-
-  void FLUSH (enum pipestage STAGE)
-  {
-    ADVANCE_PIPELINE ();
-    ++flushes;
-  }
-
-  void BUBBLE ()
-  {
-    ADVANCE_PIPELINE (EXE1);
-    ++bubbles;
-  }
-
-  // STAGE is the stage in which REG is read
-  void RREAD (enum pipestage STAGE, enum regid REG)
-  {
-    if (REG == ZERO)
-      return;
-
-    // Find the latest writer on whose result we're dependent
-    for (enum pipestage writer = ID + 1; writer < STAGES; ++writer)
-      if (dest_reg [writer] == REG) {
-        int cycles_until_available = result_stage [writer] - writer;
-        int cycles_until_needed = STAGE - ID;
-        // and execute until we can forward its result
-        while (cycles_until_available > cycles_until_needed) {
-          BUBBLE ();
-          --cycles_until_available;
-        }
-        break;
-      }
-  }
-
-  // STAGE is the first stage in which the value in REG is available
-  void RWRITE (enum pipestage STAGE, enum regid REG)
-  {
-    dest_reg [ID] = REG;
-    result_stage [ID] = STAGE;
-  }
+  integer count = 0;
 
   /// Begin program execution
-  bool cont = true;
-  while (true) {
+  while (1) {
     // IF1/2 operations
-    if (cont) {
-      pipeline [IF1] = Fetch (pc);
-      reg [ZERO] = 0;
-      pc += 4;
-      pipeline_pc [IF1] = pc;
-      ++count;
-
-      // Special-case the STOP trap to avoid fetching inaccessible memory
-      if (bitrange (pipeline [IF1], 26, 32) == TRAP &&
-          (bitrange (pipeline [IF1], 0, 26) & 0xf) == STOP)
-        cont = false;
-    }
-    else {
-      for (enum pipestage stage = IF1; stage < STAGES; ++stage)
-        if (pipeline [stage] != 0) // Remaining instructions; flush the pipeline
-          break;
-        else
-          goto halt;
-    }
+    uint32_t instr = Fetch (pc);
+    reg [ZERO] = 0;
+    pc += 4;
+    ++count;
 
     // ID operations
-    uint32_t ID_instr = pipeline [ID];
-    uint32_t ID_pc    = pipeline_pc [ID];
-    uint8_t  opcode   = bitrange (ID_instr, 26, 32);
-    uint8_t  rs       = bitrange (ID_instr, 21, 26);
-    uint8_t  rt       = bitrange (ID_instr, 16, 21);
-    uint8_t  rd       = bitrange (ID_instr, 11, 16);
-    uint8_t  shamt    = bitrange (ID_instr, 6, 11);
-    uint8_t  funct    = bitrange (ID_instr, 0, 6);
-    uint16_t uimm     = bitrange (ID_instr, 0, 16);
-    int16_t  simm     = sign_extend (uimm, 16);
-    uint32_t addr     = bitrange (ID_instr, 0, 26);
-    uint32_t jaddr    = (ID_pc & 0xf0000000) + addr * 4;
-    uint32_t baddr    = ID_pc + simm * 4;
+    uint8_t  opcode = bitrange (instr, 26, 32);
+    uint8_t  rs     = bitrange (instr, 21, 26);
+    uint8_t  rt     = bitrange (instr, 16, 21);
+    uint8_t  rd     = bitrange (instr, 11, 16);
+    uint8_t  shamt  = bitrange (instr, 6, 11);
+    uint8_t  funct  = bitrange (instr, 0, 6);
+    uint16_t uimm   = bitrange (instr, 0, 16);
+    int16_t  simm   = sign_extend (uimm, 16);
+    uint32_t addr   = bitrange (instr, 0, 26);
+    uint32_t jaddr  = (pc & 0xf0000000) + addr * 4;
+    uint32_t baddr  = pc + simm * 4;
 
     // ID (via RREAD) through WB operations
     switch (opcode)
@@ -326,135 +220,90 @@ static void Interpret (uint32_t start)
         switch (funct)
         {
           case SLL:
-            RREAD (EXE1, rs);
             reg [rd] = reg [rs] << shamt;
-            RWRITE (MEM1, rd);
             break;
 
           case SRA:
-            RREAD (EXE1, rs);
             reg [rd] = sign_extend (reg [rs] >> shamt, 32 - shamt);
-            RWRITE (MEM1, rd);
             break;
 
           case JR:
-            RREAD (ID, rs);
             pc = reg [rs];
-            FLUSH (IF2);
-            FLUSH (IF1);
             break;
 
           case MFHI:
-            RREAD (EXE1, HILO);
             reg [rd] = hi;
-            RWRITE (EXE2, rd);
             break;
 
           case MFLO:
-            RREAD (EXE1, HILO);
             reg [rd] = lo;
-            RWRITE (EXE2, rd);
             break;
 
           case MULT:
-            RREAD (EXE1, rs);
-            RREAD (EXE1, rt);
+            ; // C requires a statement after a label
             uint64_t wide = reg [rs] * reg [rt];
             lo = wide & 0xffffffff;
             hi = wide >> 32;
-            RWRITE (WB, HILO);
             break;
 
           case DIV:
-            RREAD (EXE1, rs);
-            RREAD (EXE1, rt);
             if (reg [rt] == 0) {
               fprintf (stderr, "division by zero: pc = 0x%"PRIx32"\n", pc - 4);
-              cont = false;
+              goto halt;
             }
             else {
               lo = reg [rs] / reg [rt];
               hi = reg [rs] % reg [rt];
             }
-            RWRITE (WB, HILO);
             break;
 
           case ADDU:
-            RREAD (EXE1, rs);
-            RREAD (EXE1, rt);
             reg [rd] = reg [rs] + reg [rt];
-            RWRITE (MEM1, rd);
             break;
 
           case SUBU:
-            RREAD (EXE1, rs);
-            RREAD (EXE1, rt);
             reg [rd] = reg [rs] - reg [rt];
-            RWRITE (MEM1, rd);
             break;
 
           case SLT:
-            RREAD (EXE1, rs);
-            RREAD (EXE1, rt);
             reg [rd] = ((int32_t) reg [rs] < (int32_t) reg [rt] ? 1 : 0);
-            RWRITE (MEM1, rd);
             break;
 
           default:
             fprintf (stderr, "unimplemented instruction: pc = 0x%"PRIx32"\n", pc - 4);
-            cont = false;
+            goto halt;
         }
         break;
 
       case J:
         pc = jaddr;
-        FLUSH (IF2);
-        FLUSH (IF1);
         break;
 
       case JAL:
         reg [RA] = pc;
         pc = jaddr;
-        RWRITE (EXE1, RA);
-        FLUSH ();
-        FLUSH ();
         break;
 
       case BEQ:
-        RREAD (ID, rs);
-        RREAD (ID, rt);
-        if (reg [rs] == reg [rt]) {
+        if (reg [rs] == reg [rt])
           pc = baddr;
-          FLUSH (IF2);
-          FLUSH (IF1);
-        }
         break;
 
       case BNE:
-        RREAD (ID, rs);
-        RREAD (ID, rt);
-        if (reg [rs] != reg [rt]) {
+        if (reg [rs] != reg [rt])
           pc = baddr;
-          FLUSH (IF2);
-          FLUSH (IF1);
-        }
         break;
 
       case ADDIU:
-        RREAD (EXE1, rs);
         reg [rt] = reg [rs] + simm;
-        RWRITE (MEM1, rt);
         break;
 
       case ANDI:
-        RREAD (EXE1, rs);
         reg [rt] = reg [rs] & uimm;
-        RWRITE (EXE2, rt);
         break;
 
       case LUI:
         reg [rt] = uimm << 16;
-        RWRITE (EXE2, rt);
         break;
 
       case TRAP:
@@ -465,7 +314,6 @@ static void Interpret (uint32_t start)
             break;
 
           case PRINT:
-            RREAD (EXE1, rs);
             printf (" %d", reg [rs]);
             break;
 
@@ -475,49 +323,35 @@ static void Interpret (uint32_t start)
             int32_t input;
             scanf ("%"PRIi32, &input);
             reg [rt] = input;
-            RWRITE (MEM1, rt);
             break;
 
           case STOP:
-            cont = false;
-            break;
+            goto halt;
 
           default:
             fprintf (stderr, "unimplemented trap: pc = 0x%"PRIx32"\n", pc - 4);
-            cont = false;
+            goto halt;
         }
         break;
 
       case LW:
-        RREAD (EXE1, rs);
+        CLOAD (reg [rs] + simm);
         reg [rt] = LoadWord (reg [rs] + simm);
-        RWRITE (WB, rt);
         break;
 
       case SW:
-        RREAD (EXE1, rs);
-        RREAD (MEM1, rt);
+        CSTORE (reg [rs] + simm);
         StoreWord (reg [rt], reg [rs] + simm);
         break;
 
       default:
         fprintf (stderr, "unimplemented instruction: pc = 0x%"PRIx32"\n", pc - 4);
-        cont = false;
+        goto halt;
     }
-
-    if (!cont) {
-      FLUSH (IF2);
-      FLUSH (IF1);
-    }
-    ADVANCE_PIPELINE (IF1);
   }
 
 halt:
-  printf ("\n"
-          "cycles = %"PR_INTEGER"\n"
-          "bubbles = %"PR_INTEGER"\n"
-          "flushes = %"PR_INTEGER"\n",
-          cycles, bubbles, flushes);
+  printf ("\nprogram finished at pc = 0x%"PRIx32"  (%"PR_INTEGER" instructions executed)\n", pc, count);
 }
 
 
