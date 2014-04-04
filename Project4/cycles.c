@@ -173,6 +173,7 @@ enum pipestage {
   MEM2   = 6,
   MEM3   = 7,
   WB     = 8,
+  WB2    = 9,
   STAGES = 1 + WB - IF1
 };
 
@@ -362,7 +363,7 @@ static void Interpret (uint32_t start)
             uint64_t wide = reg [rs] * reg [rt];
             lo = wide & 0xffffffff;
             hi = wide >> 32;
-            RWRITE (WB, HILO);
+            RWRITE (WB2, HILO);
             break;
 
           case DIV:
@@ -376,7 +377,7 @@ static void Interpret (uint32_t start)
               lo = reg [rs] / reg [rt];
               hi = reg [rs] % reg [rt];
             }
-            RWRITE (WB, HILO);
+            RWRITE (WB2, HILO);
             break;
 
           case ADDU:
