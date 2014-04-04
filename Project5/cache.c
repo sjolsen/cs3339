@@ -55,6 +55,7 @@ enum {
   MEMSIZE = 1048576
 };
 
+static integer count = 0;
 static uint32_t icount, *instruction;
 static uint32_t mem [MEMSIZE / 4];
 
@@ -102,6 +103,18 @@ uint32_t tag_of (uint32_t address)
   return bitrange (address, offset_bits + index_bits, 32);
 }
 
+static inline
+struct cacheline* random_block (struct cacheline* begin,
+                                struct cacheline* end)
+{
+  static const uint32_t rand_bits = log2ceil (ASSOCIATIVITY);
+  static const uint32_t rand_mask = (uint32_t)-1 >> (32 - rand_bits);
+
+  struct cacheline* block = begin + (count & rand_mask);
+  assert (block < end);
+  return block;
+}
+
 
 
 static cacheline dcache_meta [BLOCKS] = {};
@@ -109,9 +122,8 @@ static uint32_t  dcache [CACHE_SIZE / 4];
 
 static
 bool get_block (uint32_t address, struct cacheline* (*ret_block))
-/// Returns whether the access hit; and a pointer to the cacheline in
-/// `ret_block'. Dirty contents will be written out, but the caller is
-/// responsible for loading the new data.
+/* Returns whether the access hit; and a pointer to the cacheline in
+   `ret_block'. Cache contents are not affected. */
 {
   (*ret_block) = NULL;
   struct cacheline* set_begin = index_of (address);
@@ -131,7 +143,9 @@ bool get_block (uint32_t address, struct cacheline* (*ret_block))
       return false;
     }
 
-  // Get a random block and write back the contents if dirty
+  // Get a random block
+  (*ret_block) = random_block (set_begin, set_end);
+  return false;
 }
 
 static
@@ -263,10 +277,10 @@ enum regid {
 };
 
 static void Interpret (uint32_t start)
+/* This interpreter simulates a non-pipelined MIPS processor. Specifically, it
+   simulates the cache behaviour of a MIPS program and reports certain
+   statistics about that behaviour. */
 {
-  /* This interpreter simulates a non-pipelined MIPS processor. Specifically, it
-   * simulates the cache behaviour of a MIPS program and reports certain
-   * statistics about that behaviour. */
 
   /// Registers
   uint32_t pc = start;
@@ -275,11 +289,6 @@ static void Interpret (uint32_t start)
     [SP] = 0x10000000 + MEMSIZE
   };
   uint32_t lo, hi;
-
-  /// Control data
-
-  /// Statistical data
-  integer count = 0;
 
   /// Begin program execution
   while (1) {
