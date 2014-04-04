@@ -10,6 +10,8 @@
 #include <inttypes.h>
 #include <limits.h>
 #include <string.h>
+#include <assert.h>
+#include <stdbool.h>
 
 typedef intmax_t integer;
 #define PR_INTEGER PRIiMAX
@@ -83,13 +85,18 @@ enum {
 };
 
 struct cacheline {
-  uint16_t flags;
-  uint16_t index;
+  uint32_t flags;
   uint32_t tag;
 };
 
-static const uint32_t offset_bits = log2ceil (BLOCK_SIZE);
-static const uint32_t index_bits  = log2ceil (BLOCKS);
+// Compute and initialize these "constants" as global non-const variables at
+// runtime because C is so utterly braindead you can't even do log2 of a
+// constant expression at compile time
+static uint32_t offset_bits;
+static uint32_t index_bits;
+
+static uint32_t rand_bits;
+static uint32_t rand_mask;
 
 static inline
 uint32_t offset_of (uint32_t address)
@@ -113,17 +120,25 @@ static inline
 struct cacheline* random_block (struct cacheline* begin,
                                 struct cacheline* end)
 {
-  static const uint32_t rand_bits = log2ceil (ASSOCIATIVITY);
-  static const uint32_t rand_mask = (uint32_t)-1 >> (32 - rand_bits);
-
   struct cacheline* block = begin + (count & rand_mask);
   assert (block < end);
   return block;
 }
 
+static
+void INITIALIZE_GLOBAL_DATA ()
+{
+  offset_bits = log2ceil (BLOCK_SIZE);
+  index_bits  = log2ceil (BLOCKS);
+
+  rand_bits = log2ceil (ASSOCIATIVITY);
+  rand_mask = (uint32_t)-1 >> (32 - rand_bits);
+}
+
 
 
-static cacheline dcache_meta [BLOCKS] = {};
+static
+struct cacheline dcache_meta [BLOCKS] = {};
 
 static
 bool get_block (uint32_t address, struct cacheline* (*ret_block))
@@ -131,7 +146,7 @@ bool get_block (uint32_t address, struct cacheline* (*ret_block))
    `ret_block'. Cache contents are not affected. */
 {
   (*ret_block) = NULL;
-  struct cacheline* set_begin = index_of (address);
+  struct cacheline* set_begin = &dcache_meta [0] + index_of (address);
   struct cacheline* set_end   = set_begin + ASSOCIATIVITY;
 
   // Look for a block that has the right data
@@ -154,7 +169,7 @@ bool get_block (uint32_t address, struct cacheline* (*ret_block))
 }
 
 static
-void really_store (address, struct cacheline* block)
+void really_store (uint32_t address, struct cacheline* block)
 {
   assert (block->flags & VALID);
   ++write_backs;
@@ -162,7 +177,7 @@ void really_store (address, struct cacheline* block)
 }
 
 static
-void really_load (address, struct cacheline* block)
+void really_load (uint32_t address, struct cacheline* block)
 {
   assert (!(block->flags & VALID) || !(block->flags & DIRTY));
   block->flags = VALID & ~DIRTY;
@@ -170,12 +185,12 @@ void really_load (address, struct cacheline* block)
 }
 
 static
-bool prepare_block (uint32_t address)
+bool prepare_block (uint32_t address, struct cacheline* (*ret_block))
 /* Prepares a block for use, handling the processes of write-back and
    write-allocation, then returns whether the access was a hit. */
 {
-  struct cacheline* block = NULL;
-  bool hit = get_block (address, &block);
+  bool hit = get_block (address, ret_block);
+  struct cacheline* block = (*ret_block);
 
   if (!hit) {
     if ((block->flags & VALID) && (block->flags & DIRTY))
@@ -189,7 +204,8 @@ bool prepare_block (uint32_t address)
 static
 void CLOAD (uint32_t address)
 {
-  if (!prepare_block (address)) // Miss
+  struct cacheline* block = NULL;
+  if (!prepare_block (address, &block)) // Miss
     ++load_misses;
   ++loads;
 }
@@ -197,9 +213,11 @@ void CLOAD (uint32_t address)
 static
 void CSTORE (uint32_t address)
 {
-  if (!prepare_block (address)) // Miss
+  struct cacheline* block = NULL;
+  if (!prepare_block (address, &block)) // Miss
     ++store_misses;
-  ++store;
+  block->flags |= DIRTY;
+  ++stores;
 }
 
 
@@ -524,6 +542,8 @@ int main(int argc, char *argv[])
   uint32_t c, start;
   int little_endian;
   FILE *f;
+
+  INITIALIZE_GLOBAL_DATA ();
 
   printf("CS3339 MIPS Interpreter\n");
   if (argc != 2) {fprintf(stderr, "usage: %s executable\n", argv[0]); exit(-1);}
