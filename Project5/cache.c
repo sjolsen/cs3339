@@ -55,9 +55,15 @@ enum {
   MEMSIZE = 1048576
 };
 
-static integer count = 0;
 static uint32_t icount, *instruction;
 static uint32_t mem [MEMSIZE / 4];
+
+static integer count        = 0;
+static integer loads        = 0;
+static integer load_misses  = 0;
+static integer stores       = 0;
+static integer store_misses = 0;
+static integer write_backs  = 0;
 
 
 
@@ -118,7 +124,6 @@ struct cacheline* random_block (struct cacheline* begin,
 
 
 static cacheline dcache_meta [BLOCKS] = {};
-static uint32_t  dcache [CACHE_SIZE / 4];
 
 static
 bool get_block (uint32_t address, struct cacheline* (*ret_block))
@@ -149,13 +154,52 @@ bool get_block (uint32_t address, struct cacheline* (*ret_block))
 }
 
 static
+void really_store (address, struct cacheline* block)
+{
+  assert (block->flags & VALID);
+  ++write_backs;
+  block->flags &= ~DIRTY;
+}
+
+static
+void really_load (address, struct cacheline* block)
+{
+  assert (!(block->flags & VALID) || !(block->flags & DIRTY));
+  block->flags = VALID & ~DIRTY;
+  block->tag = tag_of (address);
+}
+
+static
+bool prepare_block (uint32_t address)
+/* Prepares a block for use, handling the processes of write-back and
+   write-allocation, then returns whether the access was a hit. */
+{
+  struct cacheline* block = NULL;
+  bool hit = get_block (address, &block);
+
+  if (!hit) {
+    if ((block->flags & VALID) && (block->flags & DIRTY))
+      really_store (address, block);
+    really_load (address, block);
+  }
+
+  return hit;
+}
+
+static
 void CLOAD (uint32_t address)
 {
+  if (!prepare_block (address)) // Miss
+    ++load_misses;
+  ++loads;
 }
 
 static
 void CSTORE (uint32_t address)
 {
+  if (!prepare_block (address)) // Miss
+    ++store_misses;
+  ++store;
 }
 
 
@@ -450,6 +494,27 @@ static void Interpret (uint32_t start)
 
 halt:
   printf ("\nprogram finished at pc = 0x%"PRIx32"  (%"PR_INTEGER" instructions executed)\n", pc, count);
+
+  printf ("\n"
+          "loads: %"PR_INTEGER"\n"
+          "load misses: %"PR_INTEGER"\n"
+          "stores: %"PR_INTEGER"\n"
+          "store misses: %"PR_INTEGER"\n"
+          "write backs: %"PR_INTEGER"\n",
+          loads,
+          load_misses,
+          stores,
+          store_misses,
+          write_backs);
+
+  printf ("load hit ratio: %.3f%%\n"
+          "store hit ratio: %.3f%%\n"
+          "overall hit ratio: %.3f%%\n"
+          "write backs per store: %.3f%%\n",
+          (100.0 * (loads - load_misses)) / loads,
+          (100.0 * (stores - store_misses)) / stores,
+          (100.0 * ((loads + stores) - (load_misses + store_misses))) / (loads + stores),
+          (100.0 * write_backs) / stores);
 }
 
 
