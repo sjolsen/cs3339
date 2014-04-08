@@ -146,7 +146,7 @@ bool get_block (uint32_t address, struct cacheline* (*ret_block))
    `ret_block'. Cache contents are not affected. */
 {
   (*ret_block) = NULL;
-  struct cacheline* set_begin = &dcache_meta [0] + index_of (address);
+  struct cacheline* set_begin = &(dcache_meta [index_of (address)]);
   struct cacheline* set_end   = set_begin + ASSOCIATIVITY;
 
   // Look for a block that has the right data
@@ -169,7 +169,7 @@ bool get_block (uint32_t address, struct cacheline* (*ret_block))
 }
 
 static
-void really_store (uint32_t address, struct cacheline* block)
+void write_back (struct cacheline* block)
 {
   assert (block->flags & VALID);
   ++write_backs;
@@ -177,7 +177,7 @@ void really_store (uint32_t address, struct cacheline* block)
 }
 
 static
-void really_load (uint32_t address, struct cacheline* block)
+void write_allocate (uint32_t address, struct cacheline* block)
 {
   assert (!(block->flags & VALID) || !(block->flags & DIRTY));
   block->flags = VALID & ~DIRTY;
@@ -194,8 +194,8 @@ bool prepare_block (uint32_t address, struct cacheline* (*ret_block))
 
   if (!hit) {
     if ((block->flags & VALID) && (block->flags & DIRTY))
-      really_store (address, block);
-    really_load (address, block);
+      write_back (block);
+    write_allocate (address, block);
   }
 
   return hit;
