@@ -143,7 +143,7 @@ struct cacheline dcache_meta [BLOCKS] = {};
 static
 bool get_block (uint32_t address, struct cacheline* (*ret_block))
 /* Returns whether the access hit; and a pointer to the cacheline in
-   `ret_block'. Cache contents are not affected. */
+   `ret_block'. Cache contents and metadata are unaffected. */
 {
   (*ret_block) = NULL;
   struct cacheline* set_begin = &(dcache_meta [index_of (address)]);
