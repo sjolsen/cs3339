@@ -49,6 +49,8 @@ uint_fast8_t log2ceil (uint32_t value)
 		mask >>= 1;
 		--result;
 	}
+
+	return -1;
 }
 
 
@@ -224,7 +226,7 @@ static
 void finalize_cache ()
 {
 	for (int set = 0; set < SETS; ++set)
-		for (int block = 0; block < BLOCKS; ++block)
+		for (int block = 0; block < ASSOCIATIVITY; ++block)
 			if ((dcache_meta [set][block].flags & VALID) &&
 			    (dcache_meta [set][block].flags & DIRTY))
 				write_back (&dcache_meta [set][block]);
@@ -359,7 +361,8 @@ static void Interpret (uint32_t start)
 		[GP] = 0x10008000,
 		[SP] = 0x10000000 + MEMSIZE
 	};
-	uint32_t lo, hi;
+	uint32_t lo = 0xDEADBEEF;
+	uint32_t hi = 0xDEADBEEF;
 
 	/// Begin program execution
 	while (1) {
