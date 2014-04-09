@@ -131,7 +131,7 @@ static
 void INITIALIZE_GLOBAL_DATA ()
 {
 	offset_bits = log2ceil (BLOCK_SIZE);
-	index_bits  = log2ceil (BLOCKS);
+	index_bits  = log2ceil (SETS);
 
 	rand_bits = log2ceil (ASSOCIATIVITY);
 	rand_mask = (uint32_t)-1 >> (32 - rand_bits);
