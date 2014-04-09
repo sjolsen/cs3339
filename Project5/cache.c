@@ -16,19 +16,19 @@
 typedef intmax_t integer;
 #define PR_INTEGER PRIiMAX
 
-// Extracts an the unsigned value on [low, high)
 static inline
 uint32_t bitrange (uint32_t value,
                    uint_fast8_t low,
                    uint_fast8_t high)
+/* Extracts an the unsigned value on [low, high) */
 {
 	return (value >> low) & ((1 << (high - low)) - 1);
 }
 
-// Extends the highest bit on [0, bits)
 static inline
 uint32_t sign_extend (uint32_t value,
                       uint_fast8_t bits)
+/* Extends the highest bit on [0, bits) */
 {
 	if (value & (1 << (bits - 1))) // Highest bit 1
 		return value | ((uint32_t)-1 << bits);
@@ -38,6 +38,7 @@ uint32_t sign_extend (uint32_t value,
 
 static inline
 uint_fast8_t log2ceil (uint32_t value)
+/* Computes the ceiling of log_2(value) */
 {
 	uint32_t mask = 0x80000000;
 	uint_fast8_t result = 32;
@@ -92,8 +93,7 @@ struct cacheline {
 };
 
 // Compute and initialize these "constants" as global non-const variables at
-// runtime because C is so utterly braindead you can't even do log2 of a
-// constant expression at compile time
+// runtime because C doesn't let us do the computation at compile time
 static uint32_t offset_bits;
 static uint32_t index_bits;
 
