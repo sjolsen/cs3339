@@ -472,7 +472,7 @@ static void Interpret (uint32_t start)
 			break;
 
 		case LUI:
-			reg [rt] = uimm << 16;
+			reg [rt] = (uint32_t)uimm << 16;
 			break;
 
 		case TRAP:
