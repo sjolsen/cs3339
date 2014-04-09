@@ -138,7 +138,7 @@ void INITIALIZE_GLOBAL_DATA ()
 
 
 static
-struct cacheline dcache_meta [BLOCKS] = {};
+struct cacheline dcache_meta [SETS] [ASSOCIATIVITY] = {};
 
 static
 bool get_block (uint32_t address, struct cacheline* (*ret_block))
@@ -146,8 +146,8 @@ bool get_block (uint32_t address, struct cacheline* (*ret_block))
    `ret_block'. Cache contents and metadata are unaffected. */
 {
 	(*ret_block) = NULL;
-	struct cacheline* set_begin = &(dcache_meta [index_of (address)]);
-	struct cacheline* set_end   = set_begin + ASSOCIATIVITY;
+	struct cacheline* set_begin = dcache_meta [index_of (address)];
+	struct cacheline* set_end   = dcache_meta [index_of (address) + 1];
 
 	// Look for a block that has the right data
 	for (struct cacheline* block = set_begin; block != set_end; ++block)
@@ -343,7 +343,6 @@ static void Interpret (uint32_t start)
    simulates the cache behaviour of a MIPS program and reports certain
    statistics about that behaviour. */
 {
-
 	/// Registers
 	uint32_t pc = start;
 	uint32_t reg [REGS] = {
@@ -354,13 +353,11 @@ static void Interpret (uint32_t start)
 
 	/// Begin program execution
 	while (1) {
-		// IF1/2 operations
 		uint32_t instr = Fetch (pc);
 		reg [ZERO] = 0;
 		pc += 4;
 		++count;
 
-		// ID operations
 		uint8_t  opcode = bitrange (instr, 26, 32);
 		uint8_t  rs     = bitrange (instr, 21, 26);
 		uint8_t  rt     = bitrange (instr, 16, 21);
@@ -373,7 +370,6 @@ static void Interpret (uint32_t start)
 		uint32_t jaddr  = (pc & 0xf0000000) + addr * 4;
 		uint32_t baddr  = pc + simm * 4;
 
-		// ID (via RREAD) through WB operations
 		switch (opcode)
 		{
 		case FUNCTION:
