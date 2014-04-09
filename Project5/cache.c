@@ -138,7 +138,7 @@ void INITIALIZE_GLOBAL_DATA ()
 
 
 static
-struct cacheline dcache_meta [SETS] [ASSOCIATIVITY] = {};
+struct cacheline dcache_meta [SETS][ASSOCIATIVITY] = {};
 
 static
 bool get_block (uint32_t address, struct cacheline* (*ret_block))
@@ -218,6 +218,16 @@ void CSTORE (uint32_t address)
 		++store_misses;
 	block->flags |= DIRTY;
 	++stores;
+}
+
+static
+void finalize_cache ()
+{
+	for (int set = 0; set < SETS; ++set)
+		for (int block = 0; block < BLOCKS; ++block)
+			if ((dcache_meta [set][block].flags & VALID) &&
+			    (dcache_meta [set][block].flags & DIRTY))
+				write_back (&dcache_meta [set][block]);
 }
 
 
@@ -507,6 +517,8 @@ static void Interpret (uint32_t start)
 	}
 
 halt:
+	finalize_cache ();
+
 	printf ("\nprogram finished at pc = 0x%"PRIx32"  (%"PR_INTEGER" instructions executed)\n", pc, count);
 
 	printf ("\n"
