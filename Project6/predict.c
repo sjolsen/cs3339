@@ -188,9 +188,10 @@ int lvf_sortreduce ()
 	const uint32_t* cursor = lvf_values;
 	while (cursor < lvf_next) {
 		lvf_freqs [nfreqs].value = *cursor;
-		lvf_freqs [nfreqs].freq = 1;
-		while (cursor < lvf_next && *cursor++ == lvf_freqs [nfreqs].value)
+		while (cursor < lvf_next && *cursor == lvf_freqs [nfreqs].value) {
 			++lvf_freqs [nfreqs].freq;
+			++cursor;
+		}
 		++nfreqs;
 	}
 
@@ -201,7 +202,7 @@ int lvf_sortreduce ()
 		sum += lvf_freqs [i].freq;
 
 	printf ("expected %"PR_INTEGER"; got %"PR_INTEGER"\n", lvf_next - lvf_values, sum);
-//	assert (lvf_values + sum == lvf_next);
+	assert (lvf_values + sum == lvf_next);
 
 	return nfreqs;
 }
