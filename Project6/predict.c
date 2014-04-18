@@ -39,24 +39,6 @@ uint32_t sign_extend (uint32_t value,
 		return value;
 }
 
-static inline
-uint_fast8_t log2ceil (uint32_t value)
-/* Computes the ceiling of log_2(value) */
-{
-	uint32_t mask = 0x80000000;
-	uint_fast8_t result = 32;
-	value = value - 1;
-
-	while (mask != 0) {
-		if (value & mask)
-			return result;
-		mask >>= 1;
-		--result;
-	}
-
-	return -1;
-}
-
 
 /// Global system state
 
@@ -196,13 +178,6 @@ int lvf_sortreduce ()
 	}
 
 	qsort (lvf_freqs, nfreqs, sizeof (lvf_freqs [0]), freq_greater);
-
-	integer sum = 0;
-	for (int i = 0; i < nfreqs; ++i)
-		sum += lvf_freqs [i].freq;
-
-	printf ("expected %"PR_INTEGER"; got %"PR_INTEGER"\n", lvf_next - lvf_values, sum);
-	assert (lvf_values + sum == lvf_next);
 
 	return nfreqs;
 }
@@ -501,6 +476,13 @@ static void Interpret (uint32_t start)
 
 halt:
 	printf ("\nprogram finished at pc = 0x%"PRIx32"  (%"PR_INTEGER" instructions executed)\n", pc, count);
+
+	FILE* f = fopen ("raw.sexpr", "w+");
+	fprintf (f, "(\n  ");
+	for (uint32_t* value = lvf_values; value < lvf_next; ++value)
+		fprintf (f, "%"PRIu32" ", *value);
+	fprintf (f, "\n)\n");
+	fclose (f);
 
 	if (btb_accesses > 0)
 		printf ("indirect jumps: %"PR_INTEGER"\n"
