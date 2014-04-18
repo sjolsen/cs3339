@@ -74,8 +74,7 @@ enum {
 	BTB_SIZE = 16
 };
 
-static
-uint32_t btb_table [BTB_SIZE] = {};
+static uint32_t btb_table [BTB_SIZE] = {};
 
 static integer btb_accesses = 0;
 static integer btb_hits     = 0;
@@ -99,8 +98,113 @@ void btb_predict (uint32_t instruction_address,
 
 /// Load address predictor definitions
 
+enum {
+	LAP_SIZE = 16
+};
+
+struct lap_entry {
+	uint32_t last_load_address;
+	uint32_t second_last_load_address;
+};
+
+static struct lap_entry lap_table [LAP_SIZE] = {};
+
+static integer lap_accesses = 0;
+static integer lap_hits     = 0;
+
+static inline
+int lap_index (uint32_t address)
+{
+	return (address >> 2) % LAP_SIZE;
+}
+
+static
+void lap_predict (uint32_t instruction_address,
+                  uint32_t actual_load_address)
+{
+	++lap_accesses;
+
+	struct lap_entry (*entry) = &lap_table [lap_index (instruction_address)];
+	uint32_t x = entry->last_load_address;
+	uint32_t y = entry->second_last_load_address;
+	uint32_t prediction = x + (x - y);
+
+	if (prediction == actual_load_address)
+		++lap_hits;
+
+	entry->second_last_load_address = x;
+	entry->last_load_address = actual_load_address;
+}
+
 
-/// Load value statistics definitions
+/// Load value frequency definitions
+
+enum {
+	LVF_MAX_VALUES = 61000000,
+	LVF_MAX_FREQS = 10
+};
+
+struct lvf_freq {
+	uint32_t value;
+	integer freq;
+};
+
+static struct lvf_freq lvf_freqs [LVF_MAX_VALUES] = {};
+static uint32_t lvf_values [LVF_MAX_VALUES];
+static uint32_t* lvf_next = lvf_values;
+
+static
+void lvf_load (uint32_t value)
+{
+	if (lvf_next >= lvf_values + LVF_MAX_VALUES) {
+		fprintf (stderr, "loaded too many values for the profiler\n");
+		exit (EXIT_FAILURE);
+	}
+
+	*lvf_next++ = value;
+}
+
+static inline
+int int_greater (const void* a, const void* b) {
+	int inta = *(const int*)a;
+	int intb = *(const int*)b;
+	return intb - inta;
+}
+
+static inline
+int freq_greater (const void* a, const void* b) {
+	integer freqa = (*(const struct lvf_freq*)a).freq;
+	integer freqb = (*(const struct lvf_freq*)b).freq;
+	return freqb - freqa;
+}
+
+static
+int lvf_sortreduce ()
+/* Returns the number of frequencies available in `lvf_freqs' */
+{
+	qsort (lvf_values, lvf_next - lvf_values, sizeof (lvf_values [0]), int_greater);
+
+	int nfreqs = 0;
+	const uint32_t* cursor = lvf_values;
+	while (cursor < lvf_next) {
+		lvf_freqs [nfreqs].value = *cursor;
+		lvf_freqs [nfreqs].freq = 1;
+		while (cursor < lvf_next && *cursor++ == lvf_freqs [nfreqs].value)
+			++lvf_freqs [nfreqs].freq;
+		++nfreqs;
+	}
+
+	qsort (lvf_freqs, nfreqs, sizeof (lvf_freqs [0]), freq_greater);
+
+	integer sum = 0;
+	for (int i = 0; i < nfreqs; ++i)
+		sum += lvf_freqs [i].freq;
+
+	printf ("expected %"PR_INTEGER"; got %"PR_INTEGER"\n", lvf_next - lvf_values, sum);
+//	assert (lvf_values + sum == lvf_next);
+
+	return nfreqs;
+}
 
 
 /// Memory access routines
@@ -379,7 +483,9 @@ static void Interpret (uint32_t start)
 			break;
 
 		case LW:
+			lap_predict (pc - 4, reg [rs] + simm);
 			reg [rt] = LoadWord (reg [rs] + simm);
+			lvf_load (reg [rt]);
 			break;
 
 		case SW:
@@ -401,6 +507,25 @@ halt:
 		        btb_accesses,
 		        btb_hits,
 		        (100.0 * btb_hits) / btb_accesses);
+
+	printf ("load instructions: %"PR_INTEGER"\n"
+	        "load address hits: %"PR_INTEGER" (%.1f%%)\n",
+	        lap_accesses,
+	        lap_hits,
+	        (100.0 * lap_hits) / lap_accesses);
+
+	int total_freqs = lvf_sortreduce ();
+	int print_freqs = total_freqs > LVF_MAX_FREQS ? LVF_MAX_FREQS : total_freqs;
+	integer nvalues = lvf_next - lvf_values;
+	printf ("%d unique values loaded\n"
+	        "top %d most frequently loaded values\n",
+	        total_freqs,
+	        print_freqs);
+	for (const struct lvf_freq* freq = lvf_freqs; freq < lvf_freqs + print_freqs; ++freq)
+		printf ("val = %"PRIu32" freq = %"PR_INTEGER" (%.1f%%)\n",
+		        freq->value,
+		        freq->freq,
+		        (100.0 * freq->freq) / nvalues);
 }
 
 
