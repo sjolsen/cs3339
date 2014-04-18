@@ -13,6 +13,9 @@
 #include <assert.h>
 #include <stdbool.h>
 
+
+/// Utility definitions
+
 typedef intmax_t integer;
 #define PR_INTEGER PRIiMAX
 
@@ -55,6 +58,7 @@ uint_fast8_t log2ceil (uint32_t value)
 }
 
 
+/// Global processor state and statistical data
 
 enum {
 	MEMSIZE = 1048576
@@ -67,6 +71,7 @@ static integer count = 0;
 static integer loads = 0;
 
 
+/// Branch target predictor definitions
 
 static
 void CLOAD (uint32_t address)
@@ -80,6 +85,13 @@ void CSTORE (uint32_t address)
 }
 
 
+/// Load address predictor definitions
+
+
+/// Load value statistics definitions
+
+
+/// Memory access routines
 
 static uint32_t Convert(uint32_t x)
 {
@@ -125,6 +137,7 @@ static void StoreWord(uint32_t data, uint32_t addr)
 }
 
 
+/// The processor proper
 
 enum opcode {
 	FUNCTION = 0x00,
@@ -199,7 +212,7 @@ enum regid {
 
 static void Interpret (uint32_t start)
 /* This interpreter simulates a non-pipelined MIPS processor. Specifically, it
-   simulates the cache behaviour of a MIPS program and reports certain
+   simulates the predictor behaviour of a MIPS program and reports certain
    statistics about that behaviour. */
 {
 	/// Registers
