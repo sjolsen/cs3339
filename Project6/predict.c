@@ -58,7 +58,7 @@ uint_fast8_t log2ceil (uint32_t value)
 }
 
 
-/// Global processor state and statistical data
+/// Global system state
 
 enum {
 	MEMSIZE = 1048576
@@ -67,21 +67,33 @@ enum {
 static uint32_t icount, *instruction;
 static uint32_t mem [MEMSIZE / 4];
 
-static integer count = 0;
-static integer loads = 0;
-
 
 /// Branch target predictor definitions
 
+enum {
+	BTB_SIZE = 16
+};
+
 static
-void CLOAD (uint32_t address)
+uint32_t btb_table [BTB_SIZE] = {};
+
+static integer btb_accesses = 0;
+static integer btb_hits     = 0;
+
+static inline
+int btb_index (uint32_t address)
 {
-	++loads;
+	return (address >> 2) % BTB_SIZE;
 }
 
 static
-void CSTORE (uint32_t address)
+void btb_predict (uint32_t instruction_address,
+                  uint32_t actual_target)
 {
+	++btb_accesses;
+	if (btb_table [btb_index (instruction_address)] == actual_target)
+		++btb_hits;
+	btb_table [btb_index (instruction_address)] = actual_target;
 }
 
 
@@ -224,6 +236,8 @@ static void Interpret (uint32_t start)
 	uint32_t lo = 0xDEADBEEF;
 	uint32_t hi = 0xDEADBEEF;
 
+	integer count = 0;
+
 	/// Begin program execution
 	while (1) {
 		uint32_t instr = Fetch (pc);
@@ -257,6 +271,7 @@ static void Interpret (uint32_t start)
 				break;
 
 			case JR:
+				btb_predict (pc - 4, reg [rs]);
 				pc = reg [rs];
 				break;
 
@@ -364,12 +379,10 @@ static void Interpret (uint32_t start)
 			break;
 
 		case LW:
-			CLOAD (reg [rs] + simm);
 			reg [rt] = LoadWord (reg [rs] + simm);
 			break;
 
 		case SW:
-			CSTORE (reg [rs] + simm);
 			StoreWord (reg [rt], reg [rs] + simm);
 			break;
 
@@ -381,6 +394,13 @@ static void Interpret (uint32_t start)
 
 halt:
 	printf ("\nprogram finished at pc = 0x%"PRIx32"  (%"PR_INTEGER" instructions executed)\n", pc, count);
+
+	if (btb_accesses > 0)
+		printf ("indirect jumps: %"PR_INTEGER"\n"
+		        "BTB hits: %"PR_INTEGER" (%.1f%%)\n",
+		        btb_accesses,
+		        btb_hits,
+		        (100.0 * btb_hits) / btb_accesses);
 }
 
 
