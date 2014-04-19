@@ -122,8 +122,8 @@ void lap_predict (uint32_t instruction_address,
 /// Load value frequency definitions
 
 enum {
-	LVF_MAX_VALUES = 61000000,
-	LVF_MAX_FREQS = 10
+	LVF_MAX_FREQS = 5200,
+	LVF_PRINT_FREQS = 10
 };
 
 struct lvf_freq {
@@ -131,26 +131,63 @@ struct lvf_freq {
 	integer freq;
 };
 
-static struct lvf_freq lvf_freqs [LVF_MAX_VALUES] = {};
-static uint32_t lvf_values [LVF_MAX_VALUES];
-static uint32_t* lvf_next = lvf_values;
+static integer nvalues = 0;
 
-static
-void lvf_load (uint32_t value)
-{
-	if (lvf_next >= lvf_values + LVF_MAX_VALUES) {
-		fprintf (stderr, "loaded too many values for the profiler\n");
-		exit (EXIT_FAILURE);
-	}
-
-	*lvf_next++ = value;
-}
+static struct lvf_freq lvf_freqs [LVF_MAX_FREQS] = {};
+static struct lvf_freq* lvf_next = lvf_freqs;
 
 static inline
 int int_greater (const void* a, const void* b) {
 	int inta = *(const int*)a;
 	int intb = *(const int*)b;
 	return intb - inta;
+}
+
+static
+struct lvf_freq* lvf_lookup (uint32_t value)
+{
+	struct lvf_freq* left = lvf_freqs;
+	struct lvf_freq* right = lvf_next;
+	struct lvf_freq* loc = NULL;
+
+	// Binary search in descending order
+	while (left < right) {
+		struct lvf_freq* mid = left + (right - left)/2;
+		if (mid->value == value) {
+			loc = mid;
+			break;
+		}
+		else if (mid->value > value) {
+			left = mid + 1;
+			continue;
+		}
+		else /* (mid->value < value) */ {
+			right = mid;
+			continue;
+		}
+	}
+
+	// Not found, so insert at left
+	if (loc == NULL) {
+		if (lvf_next >= lvf_freqs + LVF_MAX_FREQS) {
+			fprintf (stderr, "loaded too many unique values for the profiler\n");
+			exit (EXIT_FAILURE);
+		}
+
+		memmove (left + 1, left, (lvf_next - left) * sizeof (*left));
+		++lvf_next;
+		loc = left;
+		*loc = (struct lvf_freq) {value, 0};
+	}
+
+	return loc;
+}
+
+static
+void lvf_load (uint32_t value)
+{
+	++lvf_lookup (value)->freq;
+	++nvalues;
 }
 
 static inline
@@ -164,21 +201,8 @@ static
 int lvf_sortreduce ()
 /* Returns the number of frequencies available in `lvf_freqs' */
 {
-	qsort (lvf_values, lvf_next - lvf_values, sizeof (lvf_values [0]), int_greater);
-
-	int nfreqs = 0;
-	const uint32_t* cursor = lvf_values;
-	while (cursor < lvf_next) {
-		lvf_freqs [nfreqs].value = *cursor;
-		while (cursor < lvf_next && *cursor == lvf_freqs [nfreqs].value) {
-			++lvf_freqs [nfreqs].freq;
-			++cursor;
-		}
-		++nfreqs;
-	}
-
+	int nfreqs = lvf_next - lvf_freqs;
 	qsort (lvf_freqs, nfreqs, sizeof (lvf_freqs [0]), freq_greater);
-
 	return nfreqs;
 }
 
@@ -491,8 +515,7 @@ halt:
 	        (100.0 * lap_hits) / lap_accesses);
 
 	int total_freqs = lvf_sortreduce ();
-	int print_freqs = total_freqs > LVF_MAX_FREQS ? LVF_MAX_FREQS : total_freqs;
-	integer nvalues = lvf_next - lvf_values;
+	int print_freqs = total_freqs > LVF_PRINT_FREQS ? LVF_PRINT_FREQS : total_freqs;
 	printf ("%d unique values loaded\n"
 	        "top %d most frequently loaded values\n",
 	        total_freqs,
