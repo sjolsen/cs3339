@@ -477,13 +477,6 @@ static void Interpret (uint32_t start)
 halt:
 	printf ("\nprogram finished at pc = 0x%"PRIx32"  (%"PR_INTEGER" instructions executed)\n", pc, count);
 
-	FILE* f = fopen ("raw.sexpr", "w+");
-	fprintf (f, "(\n  ");
-	for (uint32_t* value = lvf_values; value < lvf_next; ++value)
-		fprintf (f, "%"PRIu32" ", *value);
-	fprintf (f, "\n)\n");
-	fclose (f);
-
 	if (btb_accesses > 0)
 		printf ("indirect jumps: %"PR_INTEGER"\n"
 		        "BTB hits: %"PR_INTEGER" (%.1f%%)\n",
