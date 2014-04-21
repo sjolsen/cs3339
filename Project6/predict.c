@@ -136,13 +136,6 @@ static integer lvf_nvalues = 0;
 static struct lvf_freq lvf_freqs [LVF_MAX_FREQS] = {};
 static struct lvf_freq* lvf_next = lvf_freqs;
 
-static inline
-int int_greater (const void* a, const void* b) {
-	int inta = *(const int*)a;
-	int intb = *(const int*)b;
-	return intb - inta;
-}
-
 static
 struct lvf_freq* lvf_lookup (uint32_t value)
 {
