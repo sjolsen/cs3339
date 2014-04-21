@@ -328,9 +328,7 @@ static void Interpret (uint32_t start)
 	uint32_t pc = start;
 	uint32_t reg [REGS] = {
 		[GP] = 0x10008000,
-		[SP] = 0x10000000 + MEMSIZE,
-		[FP] = 0xDEADBEEF,
-		[RA] = 0xDEADBEEF
+		[SP] = 0x10000000 + MEMSIZE
 	};
 	uint32_t lo = 0xDEADBEEF;
 	uint32_t hi = 0xDEADBEEF;
