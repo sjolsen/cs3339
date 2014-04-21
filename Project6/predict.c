@@ -131,7 +131,7 @@ struct lvf_freq {
 	integer freq;
 };
 
-static integer nvalues = 0;
+static integer lvf_nvalues = 0;
 
 static struct lvf_freq lvf_freqs [LVF_MAX_FREQS] = {};
 static struct lvf_freq* lvf_next = lvf_freqs;
@@ -187,7 +187,7 @@ static
 void lvf_load (uint32_t value)
 {
 	++lvf_lookup (value)->freq;
-	++nvalues;
+	++lvf_nvalues;
 }
 
 static inline
@@ -198,7 +198,7 @@ int freq_greater (const void* a, const void* b) {
 }
 
 static
-int lvf_sortreduce ()
+int lvf_freqreduce ()
 /* Returns the number of frequencies available in `lvf_freqs' */
 {
 	int nfreqs = lvf_next - lvf_freqs;
@@ -514,7 +514,7 @@ halt:
 	        lap_hits,
 	        (100.0 * lap_hits) / lap_accesses);
 
-	int total_freqs = lvf_sortreduce ();
+	int total_freqs = lvf_freqreduce ();
 	int print_freqs = total_freqs > LVF_PRINT_FREQS ? LVF_PRINT_FREQS : total_freqs;
 	printf ("%d unique values loaded\n"
 	        "top %d most frequently loaded values\n",
@@ -524,7 +524,7 @@ halt:
 		printf ("val = %"PRIu32" freq = %"PR_INTEGER" (%.1f%%)\n",
 		        freq->value,
 		        freq->freq,
-		        (100.0 * freq->freq) / nvalues);
+		        (100.0 * freq->freq) / lvf_nvalues);
 }
 
 
