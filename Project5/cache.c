@@ -20,9 +20,18 @@ static inline
 uint32_t bitrange (uint32_t value,
                    uint_fast8_t low,
                    uint_fast8_t high)
-/* Extracts an the unsigned value on [low, high) */
+/* Extracts the unsigned value on [low, high) */
 {
 	return (value >> low) & ((1 << (high - low)) - 1);
+}
+
+static inline
+uint32_t bitrange_mask (uint32_t value,
+                        uint_fast8_t low,
+                        uint_fast8_t high)
+/* Constructs a mask for extracting an unsigned value on [low, high) */
+{
+	return bitrange ((uint32_t)-1, low, high) << low;
 }
 
 static inline
@@ -95,7 +104,13 @@ struct cacheline {
 // Compute and initialize these "constants" as global non-const variables at
 // runtime because C doesn't let us do the computation at compile time
 static uint32_t offset_bits;
+static uint32_t offset_mask;
+
 static uint32_t index_bits;
+static uint32_t index_mask;
+
+static uint32_t tag_bits;
+static uint32_t tag_mask;
 
 static uint32_t rand_bits;
 static uint32_t rand_mask;
@@ -103,19 +118,19 @@ static uint32_t rand_mask;
 static inline
 uint32_t offset_of (uint32_t address)
 {
-	return bitrange (address, 0, offset_bits);
+	return address & offset_mask;
 }
 
 static inline
 uint32_t index_of (uint32_t address)
 {
-	return bitrange (address, offset_bits, offset_bits + index_bits);
+	return (address & index_mask) >> offset_bits;
 }
 
 static inline
 uint32_t tag_of (uint32_t address)
 {
-	return bitrange (address, offset_bits + index_bits, 32);
+	return (address & tag_mask) >> (offset_bits + index_bits);
 }
 
 static inline
@@ -131,7 +146,13 @@ static
 void INITIALIZE_GLOBAL_DATA ()
 {
 	offset_bits = log2ceil (BLOCK_SIZE);
-	index_bits  = log2ceil (SETS);
+	offset_mask = bitrange_mask ((uint32_t)-1, 0, offset_bits);
+
+	index_bits = log2ceil (SETS);
+	index_mask = bitrange_mask ((uint32_t)-1, offset_bits, offset_bits + index_bits);
+
+	tag_bits = 32 - (offset_bits + index_bits);
+	tag_mask = (uint32_t)-1 & ~(offset_mask | index_mask);
 
 	rand_bits = log2ceil (ASSOCIATIVITY);
 	rand_mask = (uint32_t)-1 >> (32 - rand_bits);
